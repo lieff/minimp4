@@ -1181,7 +1181,12 @@ int MP4E__close(MP4E_mux_t *mux)
         // The only point, which requires random file access.
         // This can be avoided using "till eof" size code, but in this case indexes must be
         // written before the mdat....
-        WRITE_4(mux->write_pos - sizeof(box_ftyp));
+        int64_t size = mux->write_pos - sizeof(box_ftyp);
+        const int64_t size_limit = (int64_t)(uint64_t)0xffffffff;
+        assert(size <= size_limit); // sequential_mode_flag=0 can't produce files >4Gb, use sequential_mode_flag=1 instead.
+        if (size > size_limit)
+            size = size_limit;
+        WRITE_4(size);
         WRITE_4(BOX_mdat);
         mux->write_callback(sizeof(box_ftyp), base, p-base, mux->token);
         p = base;
