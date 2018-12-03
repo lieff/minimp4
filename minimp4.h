@@ -871,7 +871,7 @@ MP4E_mux_t *MP4E__open(int sequential_mode_flag, void *token,
 
             // Write filler, which would be updated later
             mux->write_callback(mux->write_pos, box_ftyp, 8, mux->token);
-            mux->write_pos += 8;
+            mux->write_pos += 16; // box_ftyp + box_free for 32bit or 64bit size encoding
         }
     }
     return mux;
@@ -1182,12 +1182,20 @@ int MP4E__close(MP4E_mux_t *mux)
         // This can be avoided using "till eof" size code, but in this case indexes must be
         // written before the mdat....
         int64_t size = mux->write_pos - sizeof(box_ftyp);
-        const int64_t size_limit = (int64_t)(uint64_t)0xffffffff;
-        assert(size <= size_limit); // sequential_mode_flag=0 can't produce files >4Gb, use sequential_mode_flag=1 instead.
+        const int64_t size_limit = (int64_t)(uint64_t)0xfffffffe;
         if (size > size_limit)
-            size = size_limit;
-        WRITE_4(size);
-        WRITE_4(BOX_mdat);
+        {
+            WRITE_4(1);
+            WRITE_4(BOX_mdat);
+            WRITE_4((size >> 32) & 0xffffffff);
+            WRITE_4(size & 0xffffffff);
+        } else
+        {
+            WRITE_4(8);
+            WRITE_4(BOX_free);
+            WRITE_4(size - 8);
+            WRITE_4(BOX_mdat);
+        }
         mux->write_callback(sizeof(box_ftyp), base, p-base, mux->token);
         p = base;
     }
