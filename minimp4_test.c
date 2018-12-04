@@ -43,7 +43,7 @@ static ssize_t get_nal_size(uint8_t *buf, ssize_t size)
 static void write_callback(int64_t offset, const void *buffer, size_t size, void *token)
 {
     FILE *f = (FILE*)token;
-    fseek(f, (long)offset, SEEK_SET);
+    fseek(f, offset, SEEK_SET);
     fwrite(buffer, size, 1, f);
 }
 

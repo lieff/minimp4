@@ -2223,11 +2223,7 @@ int mp4_h264_write_nal(mp4_h264_writer_t *h, const unsigned char *nal, int lengt
                         sample_kind = MP4E_SAMPLE_RANDOM_ACCESS;
                     }
                     prev_payload_type = payload_type;
-                    MP4E__put_sample(h->mux, h->mux_track_id, nal2, sizeof_nal,
-                        // TODO
-                        timeStamp90kHz_next,
-                        //timeStamp90kHz_next - _encodedImage->_timeStamp90kHz,
-                        sample_kind);
+                    MP4E__put_sample(h->mux, h->mux_track_id, nal2, sizeof_nal, timeStamp90kHz_next, sample_kind);
                 }
                 break;
             }
@@ -2308,7 +2304,7 @@ static off_t minimp4_fsize(FILE *file)
 {
     if (fseek(file, 0, SEEK_END))
         return -1;
-    long size = (int)ftell(file);
+    off_t size = (off_t)ftell(file);
     if (size < 0)
         return -1;
     if (fseek(file, 0, SEEK_SET))
