@@ -2102,7 +2102,12 @@ static const uint8_t *find_nal_unit(const uint8_t *h264_data, int h264_data_byte
     if (start)
     {
         stop = find_start_code(start, (int)(eof - start), &zcount);
+        while (stop > start && !stop[-1])
+        {
+            stop--;
+        }
     }
+
     *pnal_unit_bytes = (int)(stop - start - zcount);
     return start;
 }
@@ -2136,7 +2141,7 @@ int mp4_h264_write_nal(mp4_h264_writer_t *h, const unsigned char *nal, int lengt
     const unsigned char *eof = nal + length;
     int sizeof_nal;
     int prev_payload_type = -1;
-    for (;;)
+    for (;;nal++)
     {
         int payload_type;
         unsigned char *nal1, *nal2;
@@ -2156,6 +2161,11 @@ int mp4_h264_write_nal(mp4_h264_writer_t *h, const unsigned char *nal, int lengt
         if (nal1 && nal2)
         {
             sizeof_nal = remove_nal_escapes(nal2, nal, sizeof_nal);
+            if (!sizeof_nal)
+            {
+                return 0;
+            }
+
             sizeof_nal = transcode_nalu(&h->sps_patcher, nal2, sizeof_nal, nal1);
             sizeof_nal = nal_put_esc(nal2, nal1, sizeof_nal);
 
