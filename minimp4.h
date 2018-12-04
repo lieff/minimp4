@@ -1501,7 +1501,7 @@ int MP4E__close(MP4E_mux_t *mux)
                             WRITE_4(0);
                             for (i = 0; i < samples_count; i++, cnt++)
                             {
-                                if (i == samples_count-1 || sample[i].duration != sample[i + 1].duration)
+                                if (i == (samples_count - 1) || sample[i].duration != sample[i + 1].duration)
                                 {
                                     WRITE_4(cnt);
                                     WRITE_4(sample[i].duration);
@@ -1533,11 +1533,30 @@ int MP4E__close(MP4E_mux_t *mux)
                         END_ATOM;
 
                         // Chunk Offset Box
-                        ATOM_FULL(BOX_stco, 0);
-                        WRITE_4(samples_count);  // entry_count
+                        int is_64_bit = 0;
                         for (i = 0; i < samples_count; i++)
+                            if (sample[i].offset > 0xffffffff)
+                            {
+                                is_64_bit = 1;
+                                break;
+                            }
+                        if (!is_64_bit)
                         {
-                            WRITE_4(sample[i].offset);
+                            ATOM_FULL(BOX_stco, 0);
+                            WRITE_4(samples_count);
+                            for (i = 0; i < samples_count; i++)
+                            {
+                                WRITE_4(sample[i].offset);
+                            }
+                        } else
+                        {
+                            ATOM_FULL(BOX_co64, 0);
+                            WRITE_4(samples_count);
+                            for (i = 0; i < samples_count; i++)
+                            {
+                                WRITE_4((sample[i].offset >> 32) & 0xffffffff);
+                                WRITE_4(sample[i].offset & 0xffffffff);
+                            }
                         }
                         END_ATOM;
 
