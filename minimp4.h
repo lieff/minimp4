@@ -2163,6 +2163,8 @@ int mp4_h264_write_nal(mp4_h264_writer_t *h, const unsigned char *nal, int lengt
             sizeof_nal = remove_nal_escapes(nal2, nal, sizeof_nal);
             if (!sizeof_nal)
             {
+                free(nal1);
+                free(nal2);
                 return 0;
             }
 
