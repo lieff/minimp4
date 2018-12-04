@@ -3,7 +3,7 @@
 
 #define VIDEO_FPS 30
 
-static uint8_t *preload(const char *path, int *data_size)
+static uint8_t *preload(const char *path, ssize_t *data_size)
 {
     FILE *file = fopen(path, "rb");
     uint8_t *data;
@@ -12,7 +12,7 @@ static uint8_t *preload(const char *path, int *data_size)
         return 0;
     if (fseek(file, 0, SEEK_END))
         exit(1);
-    *data_size = (int)ftell(file);
+    *data_size = (ssize_t)ftell(file);
     if (*data_size < 0)
         exit(1);
     if (fseek(file, 0, SEEK_SET))
@@ -20,15 +20,15 @@ static uint8_t *preload(const char *path, int *data_size)
     data = (unsigned char*)malloc(*data_size);
     if (!data)
         exit(1);
-    if ((int)fread(data, 1, *data_size, file) != *data_size)
+    if ((ssize_t)fread(data, 1, *data_size, file) != *data_size)
         exit(1);
     fclose(file);
     return data;
 }
 
-static int get_nal_size(uint8_t *buf, int size)
+static ssize_t get_nal_size(uint8_t *buf, ssize_t size)
 {
-    int pos = 3;
+    ssize_t pos = 3;
     while ((size - pos) > 3)
     {
         if (buf[pos] == 0 && buf[pos + 1] == 0 && buf[pos + 2] == 1)
@@ -54,7 +54,7 @@ int main(int argc, char **argv)
         printf("usage: minimp4 in.h264 out.mp4\n");
         return 0;
     }
-    int h264_size;
+    ssize_t h264_size;
     uint8_t *alloc_buf;
     uint8_t *buf_h264 = alloc_buf = preload(argv[1], &h264_size);
     if (!buf_h264)
@@ -78,7 +78,14 @@ int main(int argc, char **argv)
 
     while (h264_size > 0)
     {
-        int nal_size = get_nal_size(buf_h264, h264_size);
+        ssize_t nal_size = get_nal_size(buf_h264, h264_size);
+        //printf("nal size=%ld, rest=%ld\n", nal_size, h264_size);
+        if (!nal_size)
+        {
+            buf_h264  += 1;
+            h264_size -= 1;
+            continue;
+        }
 
         mp4_h264_write_nal(&mp4wr, buf_h264, nal_size, 90000/VIDEO_FPS);
         buf_h264  += nal_size;
