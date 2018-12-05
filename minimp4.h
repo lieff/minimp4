@@ -1534,12 +1534,8 @@ int MP4E__close(MP4E_mux_t *mux)
 
                         // Chunk Offset Box
                         int is_64_bit = 0;
-                        for (i = 0; i < samples_count; i++)
-                            if (sample[i].offset > 0xffffffff)
-                            {
-                                is_64_bit = 1;
-                                break;
-                            }
+                        if (samples_count && sample[samples_count - 1].offset > 0xffffffff)
+                            is_64_bit = 1;
                         if (!is_64_bit)
                         {
                             ATOM_FULL(BOX_stco, 0);
