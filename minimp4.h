@@ -904,7 +904,7 @@ int MP4E__add_track(MP4E_mux_t *mux, const MP4E_track_t *track_data)
     minimp4_vector_init(&tr->vsps, 0);
     minimp4_vector_init(&tr->vpps, 0);
     minimp4_vector_init(&tr->pending_sample, 0);
-    return ntr;//MP4E_STATUS_OK;
+    return ntr;
 }
 
 static const unsigned char *next_dsi(const unsigned char *p, const unsigned char *end, int *bytes)
@@ -1036,7 +1036,7 @@ static int add_sample_descriptor(MP4E_mux_t *mux, track_t *tr, int data_bytes, i
 int MP4E__put_sample(MP4E_mux_t *mux, int track_num, void *data, int data_bytes, int duration, int kind)
 {
     track_t *tr;
-    if (!mux || !data)// || (unsigned)track_num >= (unsigned)mux->ntracks)
+    if (!mux || !data)
     {
         return MP4E_STATUS_BAD_ARGUMENTS;
     }
@@ -1294,7 +1294,7 @@ int MP4E__close(MP4E_mux_t *mux)
                 WRITE_4(0); // height
             } else
             {
-                WRITE_4(tr->info.u.v.width*0x10000); // width
+                WRITE_4(tr->info.u.v.width*0x10000);  // width
                 WRITE_4(tr->info.u.v.height*0x10000); // height
             }
             END_ATOM;
@@ -1345,7 +1345,7 @@ int MP4E__close(MP4E_mux_t *mux)
                     {
                         // mandatory Video Media Header Box
                         ATOM_FULL(BOX_vmhd, 1);
-                        WRITE_2(0);   // graphicsmode
+                        WRITE_2(0); // graphicsmode
                         WRITE_2(0); WRITE_2(0); WRITE_2(0); // opcolor[3]
                         END_ATOM;
                     }
@@ -1446,7 +1446,7 @@ int MP4E__close(MP4E_mux_t *mux)
                             WRITE_2(0); // reserved
                             WRITE_2(0); // reserved
                             WRITE_2(1); // data_reference_index
-                            //
+
                             WRITE_2(0); // pre_defined
                             WRITE_2(0); // reserved
                             WRITE_4(0); // pre_defined
@@ -1468,9 +1468,9 @@ int MP4E__close(MP4E_mux_t *mux)
                             ATOM(BOX_avcC);
                             // AVCDecoderConfigurationRecord 5.2.4.1.1
                             WRITE_1(1); // configurationVersion
-                            WRITE_1(tr->vsps.data[2 + 1]); //
-                            WRITE_1(tr->vsps.data[2 + 2]); //
-                            WRITE_1(tr->vsps.data[2 + 3]); //
+                            WRITE_1(tr->vsps.data[2 + 1]);
+                            WRITE_1(tr->vsps.data[2 + 2]);
+                            WRITE_1(tr->vsps.data[2 + 3]);
                             WRITE_1(255); // 0xfc + NALU_len - 1
                             WRITE_1(0xe0 | numOfSequenceParameterSets);
                             for (i = 0; i < tr->vsps.bytes; i++)
@@ -1599,7 +1599,7 @@ int MP4E__close(MP4E_mux_t *mux)
                     ATOM(BOX_ccmt);
                         ATOM(BOX_data);
                             WRITE_4(1); // type
-                            WRITE_4(0); //lang
+                            WRITE_4(0); // lang
                             for (i = 0; i < (int)strlen(mux->text_comment) + 1; i++)
                             {
                                 WRITE_1(mux->text_comment[i]);
@@ -1956,8 +1956,8 @@ static int change_sps_id(bit_reader_t *bs, bs_t *bd, int new_id, int *old_id)
 static int patch_pps(h264_sps_id_patcher_t *h, bit_reader_t *bs, bs_t *bd, int new_pps_id, int *old_id)
 {
     int bytes;
-    unsigned pps_id = ue_bits(bs);               // max = 255
-    unsigned sps_id = ue_bits(bs);               // max = 31
+    unsigned pps_id = ue_bits(bs);  // max = 255
+    unsigned sps_id = ue_bits(bs);  // max = 31
 
     *old_id = pps_id;
     sps_id = h->map_sps[sps_id];
@@ -2188,24 +2188,6 @@ int mp4_h264_write_nal(mp4_h264_writer_t *h, const unsigned char *nal, int lengt
 
             switch (payload_type) {
             case 7:
-                //if (h->mux_track_id == -1)
-                //{
-                //    MP4E_track_t tr;
-                //    tr.track_media_kind = MP4E_track_t::e_video;
-                //    tr.language[0] = 'u';
-                //    tr.language[1] = 'n';
-                //    tr.language[2] = 'd';
-                //    tr.language[3] = 0;
-                //    tr.object_type_indication = MP4E_OBJECT_TYPE_AVC;
-                //    tr.time_scale  = 90000;
-                //    tr.default_duration = 0;
-                //    tr.u.v.width   = encodedImage._encodedWidth;
-                //    tr.u.v.height  = encodedImage._encodedHeight;
-                //    _mp4muxTrackId = MP4E__add_track(_mp4mux, &tr);
-                //
-                //    _needPps = true;
-                //    _needIdr = true;
-                //}
                 MP4E__set_sps(h->mux, h->mux_track_id, nal2 + 4, sizeof_nal - 4);
                 h->need_sps = 0;
                 break;
@@ -2811,7 +2793,7 @@ broken_android_meta_hack:
         case BOX_hdlr:
             if (tr) // When this box is within 'meta' box, the track may not be avaialable
             {
-                SKIP(4);            // pre_defined
+                SKIP(4); // pre_defined
                 tr->handler_type = READ(4);
             }
             // typically hdlr box does not contain any useful info.
