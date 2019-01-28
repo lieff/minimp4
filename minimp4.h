@@ -2230,55 +2230,43 @@ int mp4_h264_write_nal(mp4_h264_writer_t *h, const unsigned char *nal, int lengt
 #else
         // No SPS/PPS transcoding
         // This branch assumes that encoder use correct SPS/PPS ID's
-        int payload_type = nal[0] & 31;
+        payload_type = nal[0] & 31;
         switch (payload_type) {
             case 7:
-                if (_mp4muxTrackId == -1)
-                {
-                    MP4E_track_t tr;
-                    tr.is_audio = 0;
-                    tr.language[0] = 'u';
-                    tr.language[1] = 'n';
-                    tr.language[2] = 'd';
-                    tr.language[3] = 0;
-                    tr.object_type_indication = MP4E_OBJECT_TYPE_AVC;
-                    tr.time_scale = 90000;
-                    tr.default_duration = 0;
-                    tr.u.v.width  = encodedImage._encodedWidth;
-                    tr.u.v.height = encodedImage._encodedHeight;
-
-                    _mp4muxTrackId = MP4E__add_track(_mp4mux, &tr);
-
-                    _needPps = true;
-                    _needIdr = true;
-                }
-                MP4E__set_sps(_mp4mux, _mp4muxTrackId, nal, sizeof_nal);
+                MP4E__set_sps(h->mux, h->mux_track_id, nal, sizeof_nal);
+                h->need_sps = 0;
                 break;
             case 8:
-                if (_mp4muxTrackId == -1)
-                    return 0;
-                MP4E__set_pps(_mp4mux, _mp4muxTrackId, nal, sizeof_nal);
-                _needPps = false;
+                MP4E__set_pps(h->mux, h->mux_track_id, nal, sizeof_nal);
+                h->need_pps = 0;
                 break;
             case 5:
-                if (_mp4muxTrackId == -1)
+                if (h->need_sps)
                     return 0;
-                _needIdr = false;
+                h->need_idr = 0;
                 // flow through
             default:
-                if (_mp4muxTrackId == -1)
+                if (h->need_sps)
                     return 0;
-                if (!_needPps && !_needIdr)
+                if (!h->need_pps && !h->need_idr)
                 {
                     unsigned char *tmp = (unsigned char *)malloc(4 + sizeof_nal);
                     if (tmp)
                     {
+                        int sample_kind = MP4E_SAMPLE_DEFAULT;
                         tmp[0] = (unsigned char)(sizeof_nal >> 24);
                         tmp[1] = (unsigned char)(sizeof_nal >> 16);
                         tmp[2] = (unsigned char)(sizeof_nal >>  8);
                         tmp[3] = (unsigned char)(sizeof_nal);
                         memcpy(tmp + 4, nal, sizeof_nal);
-                        MP4E__put_sample(_mp4mux, _mp4muxTrackId, tmp, 4 + sizeof_nal, timeStamp90kHz_next - _encodedImage->_timeStamp90kHz, payload_type == 5);
+                        if (payload_type == prev_payload_type)
+                        {
+                            sample_kind = MP4E_SAMPLE_CONTINUATION;
+                        } else if (payload_type == 5)
+                        {
+                            sample_kind = MP4E_SAMPLE_RANDOM_ACCESS;
+                        }
+                        MP4E__put_sample(h->mux, h->mux_track_id, tmp, 4 + sizeof_nal, timeStamp90kHz_next, sample_kind);
                         free(tmp);
                     }
                 }
