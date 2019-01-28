@@ -69,19 +69,16 @@ extern "C" {
 /************************************************************************/
 // MPEG-4 AAC (all profiles)
 #define MP4E_OBJECT_TYPE_AUDIO_ISO_IEC_14496_3                  0x40
-
 // MPEG-2 AAC, Main profile
 #define MP4E_OBJECT_TYPE_AUDIO_ISO_IEC_13818_7_MAIN_PROFILE     0x66
-
 // MPEG-2 AAC, LC profile
 #define MP4E_OBJECT_TYPE_AUDIO_ISO_IEC_13818_7_LC_PROFILE       0x67
-
 // MPEG-2 AAC, SSR profile
 #define MP4E_OBJECT_TYPE_AUDIO_ISO_IEC_13818_7_SSR_PROFILE      0x68
-
 // H.264 (AVC) video
 #define MP4E_OBJECT_TYPE_AVC                                    0x21
-
+// H.265 (HEVC) video
+#define MP4E_OBJECT_TYPE_HEVC                                   0x23
 // http://www.mp4ra.org/object.html 0xC0-E0  && 0xE2 - 0xFE are specified as "user private"
 #define MP4E_OBJECT_TYPE_USER_PRIVATE                           0xC0
 
