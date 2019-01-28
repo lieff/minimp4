@@ -65,22 +65,22 @@ extern "C" {
 #endif
 
 /************************************************************************/
-/*          Some values of MP4E_track_t->object_type_indication         */
+/*          Some values of MP4(E/D)_track_t->object_type_indication     */
 /************************************************************************/
 // MPEG-4 AAC (all profiles)
-#define MP4E_OBJECT_TYPE_AUDIO_ISO_IEC_14496_3                  0x40
+#define MP4_OBJECT_TYPE_AUDIO_ISO_IEC_14496_3                  0x40
 // MPEG-2 AAC, Main profile
-#define MP4E_OBJECT_TYPE_AUDIO_ISO_IEC_13818_7_MAIN_PROFILE     0x66
+#define MP4_OBJECT_TYPE_AUDIO_ISO_IEC_13818_7_MAIN_PROFILE     0x66
 // MPEG-2 AAC, LC profile
-#define MP4E_OBJECT_TYPE_AUDIO_ISO_IEC_13818_7_LC_PROFILE       0x67
+#define MP4_OBJECT_TYPE_AUDIO_ISO_IEC_13818_7_LC_PROFILE       0x67
 // MPEG-2 AAC, SSR profile
-#define MP4E_OBJECT_TYPE_AUDIO_ISO_IEC_13818_7_SSR_PROFILE      0x68
+#define MP4_OBJECT_TYPE_AUDIO_ISO_IEC_13818_7_SSR_PROFILE      0x68
 // H.264 (AVC) video
-#define MP4E_OBJECT_TYPE_AVC                                    0x21
+#define MP4_OBJECT_TYPE_AVC                                    0x21
 // H.265 (HEVC) video
-#define MP4E_OBJECT_TYPE_HEVC                                   0x23
+#define MP4_OBJECT_TYPE_HEVC                                   0x23
 // http://www.mp4ra.org/object.html 0xC0-E0  && 0xE2 - 0xFE are specified as "user private"
-#define MP4E_OBJECT_TYPE_USER_PRIVATE                           0xC0
+#define MP4_OBJECT_TYPE_USER_PRIVATE                           0xC0
 
 /************************************************************************/
 /*          API error codes                                             */
@@ -119,27 +119,6 @@ typedef boxsize_t MP4D_file_offset_t;
 // General MPEG-4 systems streams (without specific handler).
 // Used for private stream, as suggested in http://www.mp4ra.org/handler.html
 #define MP4E_HANDLER_TYPE_GESM                                  0x6765736D
-
-/************************************************************************/
-/*          Some values of MP4D_track_t->object_type_indication    */
-/************************************************************************/
-// MPEG-4 AAC (all profiles)
-#define MP4D_OBJECT_TYPE_AUDIO_ISO_IEC_14496_3                  0x40
-
-// MPEG-2 AAC, Main profile
-#define MP4D_OBJECT_TYPE_AUDIO_ISO_IEC_13818_7_MAIN_PROFILE     0x66
-
-// MPEG-2 AAC, LC profile
-#define MP4D_OBJECT_TYPE_AUDIO_ISO_IEC_13818_7_LC_PROFILE       0x67
-
-// MPEG-2 AAC, SSR profile
-#define MP4D_OBJECT_TYPE_AUDIO_ISO_IEC_13818_7_SSR_PROFILE      0x68
-
-// H.264 (AVC) video
-#define MP4D_OBJECT_TYPE_AVC                                    0x21
-
-// http://www.mp4ra.org/object.html 0xC0-E0  && 0xE2 - 0xFE are specified as "user private"
-#define MP4D_OBJECT_TYPE_USER_PRIVATE                           0xC0
 
 /************************************************************************/
 /*          Data structures                                             */
@@ -1408,7 +1387,7 @@ int MP4E__close(MP4E_mux_t *mux)
                                     WRITE_OD_LEN(dcd_bytes);
                                     if (tr->info.track_media_kind == e_audio)
                                     {
-                                        WRITE_1(MP4E_OBJECT_TYPE_AUDIO_ISO_IEC_14496_3); // OD_DCD
+                                        WRITE_1(MP4_OBJECT_TYPE_AUDIO_ISO_IEC_14496_3); // OD_DCD
                                         WRITE_1(5 << 2); // stream_type == AudioStream
                                     } else
                                     {
@@ -2132,7 +2111,7 @@ int mp4_h264_write_init(mp4_h264_writer_t *h, MP4E_mux_t *mux, int width, int he
     tr.language[1] = 'n';
     tr.language[2] = 'd';
     tr.language[3] = 0;
-    tr.object_type_indication = MP4E_OBJECT_TYPE_AVC;
+    tr.object_type_indication = MP4_OBJECT_TYPE_AVC;
     tr.time_scale = 90000;
     tr.default_duration = 0;
     tr.u.v.width = width;
@@ -2863,7 +2842,7 @@ broken_android_meta_hack:
         case BOX_avcC:  // AVCDecoderConfigurationRecord()
             // hack: AAC-specific DSI field reused (for it have same purpoose as sps/pps)
             // TODO: check this hack if BOX_esds co-exist with BOX_avcC
-            tr->object_type_indication = MP4D_OBJECT_TYPE_AVC;
+            tr->object_type_indication = MP4_OBJECT_TYPE_AVC;
             tr->dsi = malloc((size_t)box_bytes);
             tr->dsi_bytes = (unsigned)box_bytes;
             {
@@ -3169,7 +3148,7 @@ static const void *MP4D__read_spspps(const MP4D_demux_t *mp4, unsigned int ntrac
     {
         return NULL;
     }
-    if (mp4->track[ntrack].object_type_indication != MP4D_OBJECT_TYPE_AVC)
+    if (mp4->track[ntrack].object_type_indication != MP4_OBJECT_TYPE_AVC)
     {
         return NULL;    // SPS/PPS are specific for AVC format only
     }
