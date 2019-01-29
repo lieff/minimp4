@@ -557,6 +557,10 @@ enum
     BOX_m4ds    = FOUR_CHAR_INT( 'm', '4', 'd', 's' ),
     BOX_seib    = FOUR_CHAR_INT( 's', 'e', 'i', 'b' ),
 
+    // H264/HEVC
+    BOX_hev1    = FOUR_CHAR_INT( 'h', 'e', 'v', '1' ),
+    BOX_hvc1    = FOUR_CHAR_INT( 'h', 'v', 'c', '1' ),
+
     //3GPP atoms
     BOX_samr    = FOUR_CHAR_INT( 's', 'a', 'm', 'r' ),//AMRSampleEntryAtomType
     BOX_sawb    = FOUR_CHAR_INT( 's', 'a', 'w', 'b' ),//WB_AMRSampleEntryAtomType
