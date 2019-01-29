@@ -1410,7 +1410,7 @@ int MP4E__close(MP4E_mux_t *mux)
                             END_ATOM;
                         }
 
-                        if (tr->info.track_media_kind == e_video)
+                        if (tr->info.track_media_kind == e_video && MP4_OBJECT_TYPE_AVC == tr->info.object_type_indication)
                         {
                             unsigned int numOfSequenceParameterSets = items_count(&tr->vsps);
                             unsigned int numOfPictureParameterSets  = items_count(&tr->vpps);
