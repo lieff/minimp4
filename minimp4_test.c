@@ -69,12 +69,13 @@ int main(int argc, char **argv)
         printf("error: can't open output file\n");
         return 0;
     }
+    int is_hevc = (0 != strstr(argv[1], "265")) || (0 != strstr(argv[1], "hevc"));
 
     int sequential_mode = 0;
     MP4E_mux_t *mux;
-    mp4_h264_writer_t mp4wr;
+    mp4_h26x_writer_t mp4wr;
     mux = MP4E__open(sequential_mode, fout, write_callback);
-    mp4_h264_write_init(&mp4wr, mux, 352, 288);
+    mp4_h26x_write_init(&mp4wr, mux, 352, 288, is_hevc);
 
     while (h264_size > 0)
     {
@@ -87,7 +88,7 @@ int main(int argc, char **argv)
             continue;
         }
 
-        mp4_h264_write_nal(&mp4wr, buf_h264, nal_size, 90000/VIDEO_FPS);
+        mp4_h26x_write_nal(&mp4wr, buf_h264, nal_size, 90000/VIDEO_FPS);
         buf_h264  += nal_size;
         h264_size -= nal_size;
     }

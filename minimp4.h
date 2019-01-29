@@ -320,8 +320,8 @@ struct MP4D_sample_to_chunk_t_tag
 typedef struct
 {
     void *sps_cache[MINIMP4_MAX_SPS];
-    int sps_bytes[MINIMP4_MAX_SPS];
     void *pps_cache[MINIMP4_MAX_PPS];
+    int sps_bytes[MINIMP4_MAX_SPS];
     int pps_bytes[MINIMP4_MAX_PPS];
 
     int map_sps[MINIMP4_MAX_SPS];
@@ -331,16 +331,15 @@ typedef struct
 
 typedef struct
 {
+#if MINIMP4_TRANSCODE_SPS_ID
     h264_sps_id_patcher_t sps_patcher;
+#endif
     MP4E_mux_t *mux;
-    int mux_track_id;
-    int need_sps;
-    int need_pps;
-    int need_idr;
-} mp4_h264_writer_t;
+    int mux_track_id, is_hevc, need_vps, need_sps, need_pps, need_idr;
+} mp4_h26x_writer_t;
 
-int mp4_h264_write_init(mp4_h264_writer_t *h, MP4E_mux_t *mux, int width, int height);
-int mp4_h264_write_nal(mp4_h264_writer_t *h, const unsigned char *nal, int length, unsigned timeStamp90kHz_next);
+int mp4_h26x_write_init(mp4_h26x_writer_t *h, MP4E_mux_t *mux, int width, int height, int is_hevc);
+int mp4_h26x_write_nal(mp4_h26x_writer_t *h, const unsigned char *nal, int length, unsigned timeStamp90kHz_next);
 
 /************************************************************************/
 /*          API                                                         */
@@ -450,6 +449,13 @@ int MP4E__close(MP4E_mux_t *mux);
 *   return error code MP4E_STATUS_*
 */
 int MP4E__set_dsi(MP4E_mux_t *mux, int track_id, const void *dsi, int bytes);
+
+/**
+*   Set VPS data. MUST be used for HEVC (H.265) track.
+*
+*   return error code MP4E_STATUS_*
+*/
+int MP4E__set_vps(MP4E_mux_t *mux, int track_id, const void *vps, int bytes);
 
 /**
 *   Set SPS data. MUST be used for AVC (H.264) track. Up to 32 different SPS can be used in one track.
@@ -670,6 +676,7 @@ typedef struct
 
     minimp4_vector_t vsps;  // or dsi for audio
     minimp4_vector_t vpps;  // not used for audio
+    minimp4_vector_t vvps;  // used for HEVC
 
 } track_t;
 
@@ -941,6 +948,13 @@ int MP4E__set_dsi(MP4E_mux_t *mux, int track_id, const void *dsi, int bytes)
         return MP4E_STATUS_ONLY_ONE_DSI_ALLOWED;   // only one DSI allowed
     }
     return append_mem(&tr->vsps, dsi, bytes) ? MP4E_STATUS_OK : MP4E_STATUS_NO_MEMORY;
+}
+
+int MP4E__set_vps(MP4E_mux_t *mux, int track_id, const void *vps, int bytes)
+{
+    track_t* tr = ((track_t*)mux->tracks.data) + track_id;
+    assert(tr->info.track_media_kind == e_video);
+    return append_mem(&tr->vvps, vps, bytes) ? MP4E_STATUS_OK : MP4E_STATUS_NO_MEMORY;
 }
 
 int MP4E__set_sps(MP4E_mux_t *mux, int track_id, const void *sps, int bytes)
@@ -2107,7 +2121,7 @@ static const uint8_t *find_nal_unit(const uint8_t *h264_data, int h264_data_byte
     return start;
 }
 
-int mp4_h264_write_init(mp4_h264_writer_t *h, MP4E_mux_t *mux, int width, int height)
+int mp4_h26x_write_init(mp4_h26x_writer_t *h, MP4E_mux_t *mux, int width, int height, int is_hevc)
 {
     MP4E_track_t tr;
     tr.track_media_kind = e_video;
@@ -2115,23 +2129,79 @@ int mp4_h264_write_init(mp4_h264_writer_t *h, MP4E_mux_t *mux, int width, int he
     tr.language[1] = 'n';
     tr.language[2] = 'd';
     tr.language[3] = 0;
-    tr.object_type_indication = MP4_OBJECT_TYPE_AVC;
+    tr.object_type_indication = is_hevc ? MP4_OBJECT_TYPE_HEVC : MP4_OBJECT_TYPE_AVC;
     tr.time_scale = 90000;
     tr.default_duration = 0;
     tr.u.v.width = width;
     tr.u.v.height = height;
     h->mux_track_id = MP4E__add_track(mux, &tr);
-
     h->mux = mux;
 
+    h->is_hevc  = is_hevc;
+    h->need_vps = is_hevc;
     h->need_sps = 1;
     h->need_pps = 1;
     h->need_idr = 1;
+#if MINIMP4_TRANSCODE_SPS_ID
     h264_sps_id_patcher_init(&h->sps_patcher);
+#endif
     return 1;
 }
 
-int mp4_h264_write_nal(mp4_h264_writer_t *h, const unsigned char *nal, int length, unsigned timeStamp90kHz_next)
+#define HEVC_NAL_VPS 32
+#define HEVC_NAL_SPS 33
+#define HEVC_NAL_PPS 34
+#define HEVC_NAL_BLA_W_LP 16
+#define HEVC_NAL_CRA_NUT  21
+
+static int mp4_h265_write_nal(mp4_h26x_writer_t *h, const unsigned char *nal, int sizeof_nal, unsigned timeStamp90kHz_next)
+{
+    int payload_type = (nal[0] >> 1) & 0x3f;
+    int is_intra = payload_type >= HEVC_NAL_BLA_W_LP && payload_type <= HEVC_NAL_CRA_NUT;
+    //printf("payload_type=%d, intra=%d\n", payload_type, is_intra);
+
+    if (is_intra && !h->need_sps && !h->need_pps && !h->need_vps)
+        h->need_idr = 0;
+    switch (payload_type)
+    {
+    case HEVC_NAL_VPS:
+        MP4E__set_vps(h->mux, h->mux_track_id, nal, sizeof_nal);
+        h->need_vps = 0;
+        break;
+    case HEVC_NAL_SPS:
+        MP4E__set_sps(h->mux, h->mux_track_id, nal, sizeof_nal);
+        h->need_sps = 0;
+        break;
+    case HEVC_NAL_PPS:
+        MP4E__set_pps(h->mux, h->mux_track_id, nal, sizeof_nal);
+        h->need_pps = 0;
+        break;
+    default:
+        if (h->need_vps || h->need_sps || h->need_pps || h->need_idr)
+            return 0;
+        {
+            unsigned char *tmp = (unsigned char *)malloc(4 + sizeof_nal);
+            if (tmp)
+            {
+                int sample_kind = MP4E_SAMPLE_DEFAULT;
+                tmp[0] = (unsigned char)(sizeof_nal >> 24);
+                tmp[1] = (unsigned char)(sizeof_nal >> 16);
+                tmp[2] = (unsigned char)(sizeof_nal >>  8);
+                tmp[3] = (unsigned char)(sizeof_nal);
+                memcpy(tmp + 4, nal, sizeof_nal);
+                if (is_intra)
+                {
+                    sample_kind = MP4E_SAMPLE_RANDOM_ACCESS;
+                }
+                MP4E__put_sample(h->mux, h->mux_track_id, tmp, 4 + sizeof_nal, timeStamp90kHz_next, sample_kind);
+                free(tmp);
+            }
+        }
+        break;
+    }
+}
+
+int mp4_h26x_write_nal(mp4_h26x_writer_t *h, const unsigned char *nal, int length, unsigned timeStamp90kHz_next)
 {
     const unsigned char *eof = nal + length;
     int sizeof_nal;
@@ -2139,10 +2209,16 @@ int mp4_h264_write_nal(mp4_h264_writer_t *h, const unsigned char *nal, int lengt
     for (;;nal++)
     {
         int payload_type;
+#if MINIMP4_TRANSCODE_SPS_ID
         unsigned char *nal1, *nal2;
+#endif
         nal = find_nal_unit(nal, (int)(eof - nal), &sizeof_nal);
-        if (!sizeof_nal) {
+        if (!sizeof_nal)
             break;
+        if (h->is_hevc)
+        {
+            mp4_h265_write_nal(h, nal, sizeof_nal, timeStamp90kHz_next);
+            continue;
         }
 #if MINIMP4_TRANSCODE_SPS_ID
         // Transcode SPS, PPS and slice headers, reassigning ID's for SPS and  PPS:
@@ -2246,6 +2322,7 @@ int mp4_h264_write_nal(mp4_h264_writer_t *h, const unsigned char *nal, int lengt
                         {
                             sample_kind = MP4E_SAMPLE_RANDOM_ACCESS;
                         }
+                        prev_payload_type = payload_type;
                         MP4E__put_sample(h->mux, h->mux_track_id, tmp, 4 + sizeof_nal, timeStamp90kHz_next, sample_kind);
                         free(tmp);
                     }
