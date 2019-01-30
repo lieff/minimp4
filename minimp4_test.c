@@ -1,5 +1,11 @@
 #define MINIMP4_IMPLEMENTATION
 #include "minimp4.h"
+#define ENABLE_AUDIO 0
+#if ENABLE_AUDIO
+#include <fdk-aac/aacenc_lib.h>
+#include <fdk-aac/aacdecoder_lib.h>
+#define AUDIO_RATE 12000
+#endif
 
 #define VIDEO_FPS 30
 
@@ -77,6 +83,41 @@ int main(int argc, char **argv)
     mux = MP4E__open(sequential_mode, fout, write_callback);
     mp4_h26x_write_init(&mp4wr, mux, 352, 288, is_hevc);
 
+#if ENABLE_AUDIO
+    ssize_t pcm_size;
+    int16_t *alloc_pcm;
+    int16_t *buf_pcm  = alloc_pcm = (int16_t *)preload("stream.pcm", &pcm_size);
+    if (!buf_pcm)
+    {
+        printf("error: can't open pcm file\n");
+        return 0;
+    }
+    uint32_t sample = 0, total_samples = pcm_size/2;
+    uint64_t ts = 0, ats = 0;
+    HANDLE_AACENCODER aacenc;
+    AACENC_InfoStruct info;
+    aacEncOpen(&aacenc, 0, 0);
+    aacEncoder_SetParam(aacenc, AACENC_TRANSMUX, 0);
+    aacEncoder_SetParam(aacenc, AACENC_AFTERBURNER, 1);
+    aacEncoder_SetParam(aacenc, AACENC_BITRATE, 64000);
+    aacEncoder_SetParam(aacenc, AACENC_SAMPLERATE, AUDIO_RATE);
+    aacEncoder_SetParam(aacenc, AACENC_CHANNELMODE, 1);
+    aacEncEncode(aacenc, NULL, NULL, NULL, NULL);
+    aacEncInfo(aacenc, &info);
+
+    MP4E_track_t tr;
+    tr.track_media_kind = e_audio;
+    tr.language[0] = 'u';
+    tr.language[1] = 'n';
+    tr.language[2] = 'd';
+    tr.language[3] = 0;
+    tr.object_type_indication = MP4_OBJECT_TYPE_AUDIO_ISO_IEC_14496_3;
+    tr.time_scale = 90000;
+    tr.default_duration = 0;
+    tr.u.a.channelcount = 1;
+    int audio_track_id = MP4E__add_track(mux, &tr);
+    MP4E__set_dsi(mux, audio_track_id, info.confBuf, info.confSize);
+#endif
     while (h264_size > 0)
     {
         ssize_t nal_size = get_nal_size(buf_h264, h264_size);
@@ -91,6 +132,53 @@ int main(int argc, char **argv)
         mp4_h26x_write_nal(&mp4wr, buf_h264, nal_size, 90000/VIDEO_FPS);
         buf_h264  += nal_size;
         h264_size -= nal_size;
+
+#if ENABLE_AUDIO
+        ts += 90000/VIDEO_FPS;
+        while (ats < ts)
+        {
+            AACENC_BufDesc in_buf, out_buf;
+            AACENC_InArgs  in_args;
+            AACENC_OutArgs out_args;
+            uint8_t buf[2048];
+            if (total_samples < 1024)
+            {
+                buf_pcm = alloc_pcm;
+                total_samples = pcm_size/2;
+            }
+            in_args.numInSamples = 1024;
+            void *in_ptr = buf_pcm, *out_ptr = buf;
+            int in_size          = 2*in_args.numInSamples;
+            int in_element_size  = 2;
+            int in_identifier    = IN_AUDIO_DATA;
+            int out_size         = sizeof(buf);
+            int out_identifier   = OUT_BITSTREAM_DATA;
+            int out_element_size = 1;
+
+            in_buf.numBufs            = 1;
+            in_buf.bufs               = &in_ptr;
+            in_buf.bufferIdentifiers  = &in_identifier;
+            in_buf.bufSizes           = &in_size;
+            in_buf.bufElSizes         = &in_element_size;
+            out_buf.numBufs           = 1;
+            out_buf.bufs              = &out_ptr;
+            out_buf.bufferIdentifiers = &out_identifier;
+            out_buf.bufSizes          = &out_size;
+            out_buf.bufElSizes        = &out_element_size;
+
+            if (AACENC_OK != aacEncEncode(aacenc, &in_buf, &out_buf, &in_args, &out_args))
+            {
+                printf("error: aac encode fail\n");
+                exit(1);
+            }
+            sample  += in_args.numInSamples;
+            buf_pcm += in_args.numInSamples;
+            total_samples -= in_args.numInSamples;
+            ats = (uint64_t)sample*90000/AUDIO_RATE;
+
+            MP4E__put_sample(mux, audio_track_id, buf, out_args.numOutBytes, 1024*90000/AUDIO_RATE, MP4E_SAMPLE_RANDOM_ACCESS);
+        }
+#endif
     }
     if (alloc_buf)
         free(alloc_buf);
