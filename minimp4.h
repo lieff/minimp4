@@ -566,6 +566,7 @@ enum
     // H264/HEVC
     BOX_hev1    = FOUR_CHAR_INT( 'h', 'e', 'v', '1' ),
     BOX_hvc1    = FOUR_CHAR_INT( 'h', 'v', 'c', '1' ),
+    BOX_hvcC    = FOUR_CHAR_INT( 'h', 'v', 'c', 'C' ),
 
     //3GPP atoms
     BOX_samr    = FOUR_CHAR_INT( 's', 'a', 'm', 'r' ),//AMRSampleEntryAtomType
@@ -1428,12 +1429,15 @@ int MP4E__close(MP4E_mux_t *mux)
                             END_ATOM;
                         }
 
-                        if (tr->info.track_media_kind == e_video && MP4_OBJECT_TYPE_AVC == tr->info.object_type_indication)
+                        if (tr->info.track_media_kind == e_video && (MP4_OBJECT_TYPE_AVC == tr->info.object_type_indication || MP4_OBJECT_TYPE_HEVC == tr->info.object_type_indication))
                         {
-                            unsigned int numOfSequenceParameterSets = items_count(&tr->vsps);
-                            unsigned int numOfPictureParameterSets  = items_count(&tr->vpps);
-
-                            ATOM(BOX_avc1);
+                            if (MP4_OBJECT_TYPE_AVC == tr->info.object_type_indication)
+                            {
+                                ATOM(BOX_avc1);
+                            } else
+                            {
+                                ATOM(BOX_hvc1);
+                            }
                             // VisualSampleEntry  8.16.2
                             // extends SampleEntry
                             WRITE_2(0); // reserved
@@ -1459,23 +1463,31 @@ int MP4E__close(MP4E_mux_t *mux)
                             WRITE_2(24); // depth
                             WRITE_2(-1); // pre_defined
 
-                            ATOM(BOX_avcC);
-                            // AVCDecoderConfigurationRecord 5.2.4.1.1
-                            WRITE_1(1); // configurationVersion
-                            WRITE_1(tr->vsps.data[2 + 1]);
-                            WRITE_1(tr->vsps.data[2 + 2]);
-                            WRITE_1(tr->vsps.data[2 + 3]);
-                            WRITE_1(255); // 0xfc + NALU_len - 1
-                            WRITE_1(0xe0 | numOfSequenceParameterSets);
-                            for (i = 0; i < tr->vsps.bytes; i++)
+                            if (MP4_OBJECT_TYPE_AVC == tr->info.object_type_indication)
                             {
-                                WRITE_1(tr->vsps.data[i]);
-                            }
-
-                            WRITE_1(numOfPictureParameterSets);
-                            for (i = 0; i < tr->vpps.bytes; i++)
+                                unsigned int numOfSequenceParameterSets = items_count(&tr->vsps);
+                                unsigned int numOfPictureParameterSets  = items_count(&tr->vpps);
+                                ATOM(BOX_avcC);
+                                // AVCDecoderConfigurationRecord 5.2.4.1.1
+                                WRITE_1(1); // configurationVersion
+                                WRITE_1(tr->vsps.data[2 + 1]);
+                                WRITE_1(tr->vsps.data[2 + 2]);
+                                WRITE_1(tr->vsps.data[2 + 3]);
+                                WRITE_1(255); // 0xfc + NALU_len - 1
+                                WRITE_1(0xe0 | numOfSequenceParameterSets);
+                                for (i = 0; i < tr->vsps.bytes; i++)
+                                {
+                                    WRITE_1(tr->vsps.data[i]);
+                                }
+                                WRITE_1(numOfPictureParameterSets);
+                                for (i = 0; i < tr->vpps.bytes; i++)
+                                {
+                                    WRITE_1(tr->vpps.data[i]);
+                                }
+                            } else
                             {
-                                WRITE_1(tr->vpps.data[i]);
+                                ATOM(BOX_hvcC);
+                                // TODO: implement hvcC
                             }
 
                             END_ATOM;
