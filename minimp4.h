@@ -1,5 +1,8 @@
 #ifndef MINIMP4_H
 #define MINIMP4_H
+
+#define branch xubinbin
+
 /*
     https://github.com/aspt/mp4
     https://github.com/lieff/minimp4
