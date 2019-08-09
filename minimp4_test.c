@@ -1,4 +1,8 @@
 #define MINIMP4_IMPLEMENTATION
+#ifdef _WIN32
+#include <sys/types.h>
+typedef size_t ssize_t;
+#endif
 #include "minimp4.h"
 #define ENABLE_AUDIO 0
 #if ENABLE_AUDIO
