@@ -2166,7 +2166,7 @@ int mp4_h26x_write_init(mp4_h26x_writer_t *h, MP4E_mux_t *mux, int width, int he
 #define HEVC_NAL_BLA_W_LP 16
 #define HEVC_NAL_CRA_NUT  21
 
-static int mp4_h265_write_nal(mp4_h26x_writer_t *h, const unsigned char *nal, int sizeof_nal, unsigned timeStamp90kHz_next)
+static void mp4_h265_write_nal(mp4_h26x_writer_t *h, const unsigned char *nal, int sizeof_nal, unsigned timeStamp90kHz_next)
 {
     int payload_type = (nal[0] >> 1) & 0x3f;
     int is_intra = payload_type >= HEVC_NAL_BLA_W_LP && payload_type <= HEVC_NAL_CRA_NUT;
@@ -2190,7 +2190,7 @@ static int mp4_h265_write_nal(mp4_h26x_writer_t *h, const unsigned char *nal, in
         break;
     default:
         if (h->need_vps || h->need_sps || h->need_pps || h->need_idr)
-            return 0;
+            return;
         {
             unsigned char *tmp = (unsigned char *)malloc(4 + sizeof_nal);
             if (tmp)
