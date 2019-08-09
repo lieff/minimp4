@@ -1,6 +1,7 @@
 #define MINIMP4_IMPLEMENTATION
 #ifdef _WIN32
 #include <sys/types.h>
+#include <stddef.h>
 typedef size_t ssize_t;
 #endif
 #include "minimp4.h"
