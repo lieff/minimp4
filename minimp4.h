@@ -126,6 +126,13 @@ typedef boxsize_t MP4D_file_offset_t;
 
 typedef struct MP4E_mux_tag MP4E_mux_t;
 
+typedef enum
+{
+    e_audio,
+    e_video,
+    e_private
+} track_media_kind_t;
+
 typedef struct
 {
     // MP4 object type code, which defined codec class for the track.
@@ -135,12 +142,7 @@ typedef struct
     // Track language: 3-char ISO 639-2T code: "und", "eng", "rus", "jpn" etc...
     unsigned char language[4];
 
-    enum
-    {
-        e_audio,
-        e_video,
-        e_private
-    } track_media_kind;
+    track_media_kind_t track_media_kind;
 
     // 90000 for video, sample rate for audio
     unsigned time_scale;
@@ -488,7 +490,7 @@ int MP4E__set_text_comment(MP4E_mux_t *mux, const char *comment);
 #if defined(MINIMP4_IMPLEMENTATION) && !defined(MINIMP4_IMPLEMENTATION_GUARD)
 #define MINIMP4_IMPLEMENTATION_GUARD
 
-#define FOUR_CHAR_INT(a, b, c, d) (((a) << 24) | ((b) << 16) | ((c) << 8) | (d))
+#define FOUR_CHAR_INT(a, b, c, d) (((uint32_t)(a) << 24) | ((b) << 16) | ((c) << 8) | (d))
 enum
 {
     BOX_co64    = FOUR_CHAR_INT( 'c', 'o', '6', '4' ),//ChunkLargeOffsetAtomType
@@ -839,7 +841,7 @@ MP4E_mux_t *MP4E__open(int sequential_mode_flag, void *token,
 {
     MP4E_mux_t *mux;
 
-    mux = malloc(sizeof(MP4E_mux_t));
+    mux = (MP4E_mux_t*)malloc(sizeof(MP4E_mux_t));
     if (mux)
     {
         mux->sequential_mode_flag = sequential_mode_flag;
@@ -1098,17 +1100,13 @@ static int od_size_of_size(int size)
 int MP4E__set_text_comment(MP4E_mux_t *mux, const char *comment)
 {
     if (!mux)
-    {
         return MP4E_STATUS_BAD_ARGUMENTS;
-    }
     if (mux->text_comment)
-    {
         free(mux->text_comment);
-    }
     mux->text_comment = NULL;
     if (comment)
     {
-        mux->text_comment = malloc(strlen(comment) + 1);
+        mux->text_comment = (char*)malloc(strlen(comment) + 1);
         if (mux->text_comment)
         {
             strcpy(mux->text_comment, comment);
@@ -1163,11 +1161,9 @@ int MP4E__close(MP4E_mux_t *mux)
     }
 
     // Allocate index memory
-    base = malloc(index_bytes);
+    base = (unsigned char*)malloc(index_bytes);
     if (!base)
-    {
         return MP4E_STATUS_NO_MEMORY;
-    }
     p = base;
 
     if (!mux->sequential_mode_flag)
@@ -2424,7 +2420,7 @@ static void my_fseek(FILE *f, boxsize_t pos, int *eof_flag)
 
 #define READ(n) read_payload(f, n, &payload_bytes, &eof_flag)
 #define SKIP(n) { boxsize_t t = MINIMP4_MIN(payload_bytes, n); my_fseek(f, t, &eof_flag); payload_bytes -= t; }
-#define MALLOC(p, size) p = malloc(size); if (!(p)) { ERROR("out of memory"); }
+#define MALLOC(t, p, size) p = (t)malloc(size); if (!(p)) { ERROR("out of memory"); }
 
 /*
 *   On error: release resources, rewind the file.
@@ -2712,7 +2708,7 @@ broken_android_meta_hack:
                 int size = 0;
                 uint32_t sample_size = READ(4);
                 tr->sample_count = READ(4);
-                MALLOC(tr->entry_size, tr->sample_count*4);
+                MALLOC(unsigned int*, tr->entry_size, tr->sample_count*4);
                 for (i = 0; i < tr->sample_count; i++)
                 {
                     if (box_name == BOX_stsz)
@@ -2747,7 +2743,7 @@ broken_android_meta_hack:
 
         case BOX_stsc:  //ISO/IEC 14496-12 Page 38. Section 8.18 - Sample To Chunk Box.
             tr->sample_to_chunk_count = READ(4);
-            MALLOC(tr->sample_to_chunk, tr->sample_to_chunk_count*sizeof(tr->sample_to_chunk[0]));
+            MALLOC(MP4D_sample_to_chunk_t*, tr->sample_to_chunk, tr->sample_to_chunk_count*sizeof(tr->sample_to_chunk[0]));
             for (i = 0; i < tr->sample_to_chunk_count; i++)
             {
                 tr->sample_to_chunk[i].first_chunk = READ(4);
@@ -2761,8 +2757,8 @@ broken_android_meta_hack:
                 unsigned count = READ(4);
                 unsigned j, k = 0, ts = 0, ts_count = count;
 #if MP4D_TIMESTAMPS_SUPPORTED
-                MALLOC(tr->timestamp, ts_count*4);
-                MALLOC(tr->duration, ts_count*4);
+                MALLOC(unsigned int*, tr->timestamp, ts_count*4);
+                MALLOC(unsigned int*, tr->duration, ts_count*4);
 #endif
 
                 for (i = 0; i < count; i++)
@@ -2774,8 +2770,8 @@ broken_android_meta_hack:
                     if (k + sc > ts_count)
                     {
                         ts_count = k + sc;
-                        tr->timestamp = realloc(tr->timestamp, ts_count * sizeof(unsigned));
-                        tr->duration  = realloc(tr->duration, ts_count * sizeof(unsigned));
+                        tr->timestamp = (unsigned int*)realloc(tr->timestamp, ts_count * sizeof(unsigned));
+                        tr->duration  = (unsigned int*)realloc(tr->duration,  ts_count * sizeof(unsigned));
                     }
                     for (j = 0; j < sc; j++)
                     {
@@ -2805,7 +2801,7 @@ broken_android_meta_hack:
         case BOX_stco:  //ISO/IEC 14496-12 Page 39. Section 8.19 - Chunk Offset Box.
         case BOX_co64:
             tr->chunk_count = READ(4);
-            MALLOC(tr->chunk_offset, tr->chunk_count*sizeof(MP4D_file_offset_t));
+            MALLOC(MP4D_file_offset_t*, tr->chunk_offset, tr->chunk_count*sizeof(MP4D_file_offset_t));
             for (i = 0; i < tr->chunk_count; i++)
             {
                 tr->chunk_offset[i] = READ(4);
@@ -2936,7 +2932,7 @@ broken_android_meta_hack:
             // hack: AAC-specific DSI field reused (for it have same purpoose as sps/pps)
             // TODO: check this hack if BOX_esds co-exist with BOX_avcC
             tr->object_type_indication = MP4_OBJECT_TYPE_AVC;
-            tr->dsi = malloc((size_t)box_bytes);
+            tr->dsi = (unsigned char*)malloc((size_t)box_bytes);
             tr->dsi_bytes = (unsigned)box_bytes;
             {
                 int spspps;
@@ -3013,7 +3009,7 @@ broken_android_meta_hack:
             assert(tr);     // ensured by g_fullbox[] check
             if (!tr->dsi && payload_bytes)
             {
-                MALLOC(tr->dsi, (int)payload_bytes);
+                MALLOC(unsigned char*, tr->dsi, (int)payload_bytes);
                 for (i = 0; i < payload_bytes; i++)
                 {
                     tr->dsi[i] = minimp4_read(f, 1, &eof_flag);    // These bytes available due to check above
@@ -3040,7 +3036,7 @@ broken_android_meta_hack:
 #else
             SKIP(4 + 4 + 4 + 4);
 #endif
-            MALLOC(*ptag, (unsigned)payload_bytes + 1);
+            MALLOC(unsigned char*, *ptag, (unsigned)payload_bytes + 1);
             for (i = 0; payload_bytes != 0; i++)
             {
                 (*ptag)[i] = READ(1);
@@ -3062,7 +3058,7 @@ broken_android_meta_hack:
                 // if realloc fails, it does not deallocate old pointer!
                 ERROR("out of memory");
             }
-            mp4->track = mem;
+            mp4->track = (MP4D_track_t*)mem;
             tr = mp4->track + mp4->track_count++;
             memset(tr, 0, sizeof(MP4D_track_t));
         } else if (box_name == BOX_meta)
