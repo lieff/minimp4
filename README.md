@@ -5,6 +5,10 @@ Mini MP4
 
 Easy embeddable MP4 mux/demux library.
 
+## Bindings
+
+ * https://github.com/darkskygit/minimp4.rs - rust bindings
+
 ## Interesting links
 
  * https://github.com/aspt/mp4
