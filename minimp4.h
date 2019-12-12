@@ -338,12 +338,12 @@ int mp4_h26x_write_nal(mp4_h26x_writer_t *h, const unsigned char *nal, int lengt
 /************************************************************************/
 
 /**
-*   Parse given file as MP4 file.  Allocate and store data indexes.
+*   Parse given input stream as MP4 file. Allocate and store data indexes.
 *   return 1 on success, 0 on failure
 *   Given file rewind()'ed on return.
-*   The MP4 indexes may be stored at the end of file, so this
-*   function may parse all file, using fseek().
-*   It is guaranteed that function will read/seek the file sequentially,
+*   The MP4 indexes may be stored at the end of stream, so this
+*   function may parse all stream.
+*   It is guaranteed that function will read/seek sequentially,
 *   and will never jump back.
 */
 int MP4D_open(MP4D_demux_t *mp4, int (*read_callback)(int64_t offset, void *buffer, size_t size, void *token), void *token, int64_t file_size);
@@ -356,7 +356,7 @@ int MP4D_open(MP4D_demux_t *mp4, int (*read_callback)(int64_t offset, void *buff
 *   timestamp [OUT]     - return frame timestamp (in mp4->timescale units)
 *   duration [OUT]      - return frame duration (in mp4->timescale units)
 *
-*   function return file offset for the frame
+*   function return offset for the frame
 */
 MP4D_file_offset_t MP4D_frame_offset(const MP4D_demux_t *mp4, unsigned int ntrack, unsigned int nsample, unsigned int *frame_bytes, unsigned *timestamp, unsigned *duration);
 
@@ -2420,7 +2420,7 @@ static int minimp4_fgets(MP4D_demux_t *mp4)
 }
 
 /**
-*   Read given number of bytes from the file
+*   Read given number of bytes from input stream
 *   Used to read box headers
 */
 static unsigned minimp4_read(MP4D_demux_t *mp4, int nb, int *eof_flag)

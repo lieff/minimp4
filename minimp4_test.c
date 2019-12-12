@@ -74,7 +74,8 @@ static int read_callback(int64_t offset, void *buffer, size_t size, void *token)
 
 int demux(uint8_t *input_buf, ssize_t input_size, FILE *fout)
 {
-    int ntrack, i;
+    int ntrack, i, spspps_bytes;
+    const void *spspps;
     INPUT_BUFFER buf = { input_buf, input_size };
     MP4D_demux_t mp4 = { 0, };
     MP4D_open(&mp4, read_callback, &buf, input_size);
@@ -85,6 +86,22 @@ int demux(uint8_t *input_buf, ssize_t input_size, FILE *fout)
         unsigned sum_duration = 0;
         if (!(tr->handler_type == MP4D_HANDLER_TYPE_VIDE || tr->handler_type == MP4D_HANDLER_TYPE_SOUN) || ntrack > 0) /* currently take only 1st track and assume it h264 */
             continue;
+        i = 0;
+#define USE_SHORT_SYNC 0
+        char sync[4] = { 0, 0, 0, 1 };
+        while (spspps = MP4D_read_sps(&mp4, ntrack, i, &spspps_bytes))
+        {
+            fwrite(sync + USE_SHORT_SYNC, 1, 4 - USE_SHORT_SYNC, fout);
+            fwrite(spspps, 1, spspps_bytes, fout);
+            i++;
+        }
+        i = 0;
+        while (spspps = MP4D_read_pps(&mp4, ntrack, i, &spspps_bytes))
+        {
+            fwrite(sync + USE_SHORT_SYNC, 1, 4 - USE_SHORT_SYNC, fout);
+            fwrite(spspps, 1, spspps_bytes, fout);
+            i++;
+        }
         for (i = 0; i < mp4.track[ntrack].sample_count; i++)
         {
             unsigned frame_bytes, timestamp, duration;
@@ -92,7 +109,7 @@ int demux(uint8_t *input_buf, ssize_t input_size, FILE *fout)
             uint8_t *mem = input_buf + ofs;
             mem[0] = 0; mem[1] = 0; mem[2] = 0; mem[3] = 1;
             sum_duration += duration;
-            fwrite(mem, 1, frame_bytes, fout);
+            fwrite(mem + USE_SHORT_SYNC, 1, frame_bytes - USE_SHORT_SYNC, fout);
         }
     }
 
@@ -106,7 +123,7 @@ int main(int argc, char **argv)
     // check switches
     int sequential_mode = 0;
     int fragmentation_mode = 0;
-    int de_demux = 0;
+    int do_demux = 0;
     int i;
     for(i = 1; i < argc; i++)
     {
@@ -114,8 +131,8 @@ int main(int argc, char **argv)
             break;
         switch (argv[i][1])
         {
-        case 'm': de_demux = 0; break;
-        case 'd': de_demux = 1; break;
+        case 'm': do_demux = 0; break;
+        case 'd': do_demux = 1; break;
         case 's': sequential_mode = 1; break;
         case 'f': fragmentation_mode = 1; break;
         default:
@@ -150,7 +167,7 @@ int main(int argc, char **argv)
         exit(1);
     }
 
-    if (de_demux)
+    if (do_demux)
         return demux(alloc_buf, h264_size, fout);
 
     int is_hevc = (0 != strstr(argv[1], "265")) || (0 != strstr(argv[i], "hevc"));
