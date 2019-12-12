@@ -1704,8 +1704,6 @@ int MP4E_close(MP4E_mux_t *mux)
     return err;
 }
 
-#if MINIMP4_TRANSCODE_SPS_ID
-
 typedef uint32_t bs_item_t;
 #define BS_BITS 32
 
@@ -1807,6 +1805,8 @@ static int ue_bits(bit_reader_t *bs)
     val = (1 << clz) - 1 + (clz ? get_bits(bs, clz) : 0);
     return val;
 }
+
+#if MINIMP4_TRANSCODE_SPS_ID
 
 /**
 *   Output bitstream
@@ -2272,10 +2272,9 @@ static int mp4_h265_write_nal(mp4_h26x_writer_t *h, const unsigned char *nal, in
 int mp4_h26x_write_nal(mp4_h26x_writer_t *h, const unsigned char *nal, int length, unsigned timeStamp90kHz_next)
 {
     const unsigned char *eof = nal + length;
-    int sizeof_nal, err = MP4E_STATUS_OK;
+    int payload_type, sizeof_nal, err = MP4E_STATUS_OK;
     for (;;nal++)
     {
-        int payload_type;
 #if MINIMP4_TRANSCODE_SPS_ID
         unsigned char *nal1, *nal2;
 #endif
@@ -2287,13 +2286,12 @@ int mp4_h26x_write_nal(mp4_h26x_writer_t *h, const unsigned char *nal, int lengt
             ERR(mp4_h265_write_nal(h, nal, sizeof_nal, timeStamp90kHz_next));
             continue;
         }
+        payload_type = nal[0] & 31;
 #if MINIMP4_TRANSCODE_SPS_ID
         // Transcode SPS, PPS and slice headers, reassigning ID's for SPS and  PPS:
         // - assign unique ID's to different SPS and PPS
         // - assign same ID's to equal (except ID) SPS and PPS
         // - save all different SPS and PPS
-
-        payload_type = nal[0] & 31;
         nal1 = (unsigned char *)malloc(sizeof_nal*17/16 + 32);
         if (!nal1)
             return MP4E_STATUS_NO_MEMORY;
@@ -2358,7 +2356,6 @@ exit_with_free:
 #else
         // No SPS/PPS transcoding
         // This branch assumes that encoder use correct SPS/PPS ID's
-        payload_type = nal[0] & 31;
         switch (payload_type) {
             case 7:
                 MP4E_set_sps(h->mux, h->mux_track_id, nal, sizeof_nal);
@@ -2378,10 +2375,10 @@ exit_with_free:
                     return MP4E_STATUS_BAD_ARGUMENTS;
                 if (!h->need_pps && !h->need_idr)
                 {
+                    bit_reader_t bs[1];
                     unsigned char *tmp = (unsigned char *)malloc(4 + sizeof_nal);
                     if (!tmp)
                         return MP4E_STATUS_NO_MEMORY;
-                    bit_reader_t bs[1];
                     init_bits(bs, nal + 1, sizeof_nal - 1);
                     unsigned first_mb_in_slice = ue_bits(bs);
                     int sample_kind = MP4E_SAMPLE_DEFAULT;
@@ -2394,7 +2391,6 @@ exit_with_free:
                         sample_kind = MP4E_SAMPLE_CONTINUATION;
                     else if (payload_type == 5)
                         sample_kind = MP4E_SAMPLE_RANDOM_ACCESS;
-                    prev_payload_type = payload_type;
                     err = MP4E_put_sample(h->mux, h->mux_track_id, tmp, 4 + sizeof_nal, timeStamp90kHz_next, sample_kind);
                     free(tmp);
                 }
