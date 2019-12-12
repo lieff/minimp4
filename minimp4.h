@@ -2298,7 +2298,6 @@ int mp4_h26x_write_nal(mp4_h26x_writer_t *h, const unsigned char *nal, int lengt
 {
     const unsigned char *eof = nal + length;
     int sizeof_nal;
-    int prev_payload_type = -1;
     for (;;nal++)
     {
         int payload_type;
@@ -2356,19 +2355,22 @@ int mp4_h26x_write_nal(mp4_h26x_writer_t *h, const unsigned char *nal, int lengt
                     return 0;
                 if (!h->need_pps && !h->need_idr)
                 {
+                    bit_reader_t bs[1];
+                    init_bits(bs, nal + 1, sizeof_nal - 4 - 1);
+                    unsigned first_mb_in_slice = ue_bits(bs);
+                    //unsigned slice_type = ue_bits(bs);
                     int sample_kind = MP4E_SAMPLE_DEFAULT;
                     nal2[0] = (unsigned char)((sizeof_nal - 4) >> 24);
                     nal2[1] = (unsigned char)((sizeof_nal - 4) >> 16);
                     nal2[2] = (unsigned char)((sizeof_nal - 4) >>  8);
                     nal2[3] = (unsigned char)((sizeof_nal - 4));
-                    if (payload_type == prev_payload_type)
+                    if (first_mb_in_slice)
                     {
                         sample_kind = MP4E_SAMPLE_CONTINUATION;
                     } else if (payload_type == 5)
                     {
                         sample_kind = MP4E_SAMPLE_RANDOM_ACCESS;
                     }
-                    prev_payload_type = payload_type;
                     MP4E_put_sample(h->mux, h->mux_track_id, nal2, sizeof_nal, timeStamp90kHz_next, sample_kind);
                 }
                 break;
@@ -2402,13 +2404,16 @@ int mp4_h26x_write_nal(mp4_h26x_writer_t *h, const unsigned char *nal, int lengt
                     unsigned char *tmp = (unsigned char *)malloc(4 + sizeof_nal);
                     if (tmp)
                     {
+                        bit_reader_t bs[1];
+                        init_bits(bs, nal + 1, sizeof_nal - 1);
+                        unsigned first_mb_in_slice = ue_bits(bs);
                         int sample_kind = MP4E_SAMPLE_DEFAULT;
                         tmp[0] = (unsigned char)(sizeof_nal >> 24);
                         tmp[1] = (unsigned char)(sizeof_nal >> 16);
                         tmp[2] = (unsigned char)(sizeof_nal >>  8);
                         tmp[3] = (unsigned char)(sizeof_nal);
                         memcpy(tmp + 4, nal, sizeof_nal);
-                        if (payload_type == prev_payload_type)
+                        if (first_mb_in_slice)
                             sample_kind = MP4E_SAMPLE_CONTINUATION;
                         else if (payload_type == 5)
                             sample_kind = MP4E_SAMPLE_RANDOM_ACCESS;
