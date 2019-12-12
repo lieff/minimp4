@@ -2320,64 +2320,66 @@ int mp4_h26x_write_nal(mp4_h26x_writer_t *h, const unsigned char *nal, int lengt
 
         payload_type = nal[0] & 31;
         nal1 = (unsigned char *)malloc(sizeof_nal*17/16 + 32);
+        if (!nal1)
+            return 0;
         nal2 = (unsigned char *)malloc(sizeof_nal*17/16 + 32);
-        if (nal1 && nal2)
+        if (!nal2)
         {
-            sizeof_nal = remove_nal_escapes(nal2, nal, sizeof_nal);
-            if (!sizeof_nal)
-            {
-                free(nal1);
-                free(nal2);
-                return 0;
-            }
-
-            sizeof_nal = transcode_nalu(&h->sps_patcher, nal2, sizeof_nal, nal1);
-            sizeof_nal = nal_put_esc(nal2, nal1, sizeof_nal);
-
-            switch (payload_type) {
-            case 7:
-                MP4E_set_sps(h->mux, h->mux_track_id, nal2 + 4, sizeof_nal - 4);
-                h->need_sps = 0;
-                break;
-            case 8:
-                if (h->need_sps)
-                    return 0;
-                MP4E_set_pps(h->mux, h->mux_track_id, nal2 + 4, sizeof_nal - 4);
-                h->need_pps = 0;
-                break;
-            case 5:
-                if (h->need_sps)
-                    return 0;
-                h->need_idr = 0;
-                // flow through
-            default:
-                if (h->need_sps)
-                    return 0;
-                if (!h->need_pps && !h->need_idr)
-                {
-                    bit_reader_t bs[1];
-                    init_bits(bs, nal + 1, sizeof_nal - 4 - 1);
-                    unsigned first_mb_in_slice = ue_bits(bs);
-                    //unsigned slice_type = ue_bits(bs);
-                    int sample_kind = MP4E_SAMPLE_DEFAULT;
-                    nal2[0] = (unsigned char)((sizeof_nal - 4) >> 24);
-                    nal2[1] = (unsigned char)((sizeof_nal - 4) >> 16);
-                    nal2[2] = (unsigned char)((sizeof_nal - 4) >>  8);
-                    nal2[3] = (unsigned char)((sizeof_nal - 4));
-                    if (first_mb_in_slice)
-                    {
-                        sample_kind = MP4E_SAMPLE_CONTINUATION;
-                    } else if (payload_type == 5)
-                    {
-                        sample_kind = MP4E_SAMPLE_RANDOM_ACCESS;
-                    }
-                    MP4E_put_sample(h->mux, h->mux_track_id, nal2, sizeof_nal, timeStamp90kHz_next, sample_kind);
-                }
-                break;
-            }
+            free(nal1);
+            return 0;
+        }
+        sizeof_nal = remove_nal_escapes(nal2, nal, sizeof_nal);
+        if (!sizeof_nal)
+        {
+exit_with_free:
             free(nal1);
             free(nal2);
+            return 0;
         }
+
+        sizeof_nal = transcode_nalu(&h->sps_patcher, nal2, sizeof_nal, nal1);
+        sizeof_nal = nal_put_esc(nal2, nal1, sizeof_nal);
+
+        switch (payload_type) {
+        case 7:
+            MP4E_set_sps(h->mux, h->mux_track_id, nal2 + 4, sizeof_nal - 4);
+            h->need_sps = 0;
+            break;
+        case 8:
+            if (h->need_sps)
+                goto exit_with_free;
+            MP4E_set_pps(h->mux, h->mux_track_id, nal2 + 4, sizeof_nal - 4);
+            h->need_pps = 0;
+            break;
+        case 5:
+            if (h->need_sps)
+                goto exit_with_free;
+            h->need_idr = 0;
+            // flow through
+        default:
+            if (h->need_sps)
+                goto exit_with_free;
+            if (!h->need_pps && !h->need_idr)
+            {
+                bit_reader_t bs[1];
+                init_bits(bs, nal + 1, sizeof_nal - 4 - 1);
+                unsigned first_mb_in_slice = ue_bits(bs);
+                //unsigned slice_type = ue_bits(bs);
+                int sample_kind = MP4E_SAMPLE_DEFAULT;
+                nal2[0] = (unsigned char)((sizeof_nal - 4) >> 24);
+                nal2[1] = (unsigned char)((sizeof_nal - 4) >> 16);
+                nal2[2] = (unsigned char)((sizeof_nal - 4) >>  8);
+                nal2[3] = (unsigned char)((sizeof_nal - 4));
+                if (first_mb_in_slice)
+                    sample_kind = MP4E_SAMPLE_CONTINUATION;
+                else if (payload_type == 5)
+                    sample_kind = MP4E_SAMPLE_RANDOM_ACCESS;
+                MP4E_put_sample(h->mux, h->mux_track_id, nal2, sizeof_nal, timeStamp90kHz_next, sample_kind);
+            }
+            break;
+        }
+        free(nal1);
+        free(nal2);
 #else
         // No SPS/PPS transcoding
         // This branch assumes that encoder use correct SPS/PPS ID's
