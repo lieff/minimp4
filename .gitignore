@@ -1,3 +1,4 @@
+.vscode
 minimp4_*
 qemu-prof
 *.mp4

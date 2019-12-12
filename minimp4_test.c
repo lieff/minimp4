@@ -51,11 +51,11 @@ static ssize_t get_nal_size(uint8_t *buf, ssize_t size)
     return size;
 }
 
-static void write_callback(int64_t offset, const void *buffer, size_t size, void *token)
+static int write_callback(int64_t offset, const void *buffer, size_t size, void *token)
 {
     FILE *f = (FILE*)token;
     fseek(f, offset, SEEK_SET);
-    fwrite(buffer, size, 1, f);
+    return fwrite(buffer, 1, size, f) != size;
 }
 
 int main(int argc, char **argv)
@@ -83,9 +83,10 @@ int main(int argc, char **argv)
     int is_hevc = (0 != strstr(argv[1], "265")) || (0 != strstr(argv[1], "hevc"));
 
     int sequential_mode = 0;
+    int enable_fragmentation = 0;
     MP4E_mux_t *mux;
     mp4_h26x_writer_t mp4wr;
-    mux = MP4E__open(sequential_mode, fout, write_callback);
+    mux = MP4E_open(sequential_mode, enable_fragmentation, fout, write_callback);
     mp4_h26x_write_init(&mp4wr, mux, 352, 288, is_hevc);
 
 #if ENABLE_AUDIO
@@ -120,21 +121,26 @@ int main(int argc, char **argv)
     tr.time_scale = 90000;
     tr.default_duration = 0;
     tr.u.a.channelcount = 1;
-    int audio_track_id = MP4E__add_track(mux, &tr);
-    MP4E__set_dsi(mux, audio_track_id, info.confBuf, info.confSize);
+    int audio_track_id = MP4E_add_track(mux, &tr);
+    MP4E_set_dsi(mux, audio_track_id, info.confBuf, info.confSize);
 #endif
     while (h264_size > 0)
     {
         ssize_t nal_size = get_nal_size(buf_h264, h264_size);
-        //printf("nal size=%ld, rest=%ld\n", nal_size, h264_size);
-        if (!nal_size)
+        if (nal_size < 4)
         {
             buf_h264  += 1;
             h264_size -= 1;
             continue;
         }
+        /*int startcode_size = 4;
+        if (buf_h264[0] == 0 && buf_h264[1] == 0 && buf_h264[2] == 1)
+            startcode_size = 3;
+        int nal_type = buf_h264[startcode_size] & 31;
+        int is_intra = (nal_type == 5);
+        printf("nal size=%ld, nal_type=%d\n", nal_size, nal_type);*/
 
-        mp4_h26x_write_nal(&mp4wr, buf_h264, nal_size, 90000/VIDEO_FPS);
+        int ret = mp4_h26x_write_nal(&mp4wr, buf_h264, nal_size, 90000/VIDEO_FPS);
         buf_h264  += nal_size;
         h264_size -= nal_size;
 
@@ -181,13 +187,13 @@ int main(int argc, char **argv)
             total_samples -= in_args.numInSamples;
             ats = (uint64_t)sample*90000/AUDIO_RATE;
 
-            MP4E__put_sample(mux, audio_track_id, buf, out_args.numOutBytes, 1024*90000/AUDIO_RATE, MP4E_SAMPLE_RANDOM_ACCESS);
+            MP4E_put_sample(mux, audio_track_id, buf, out_args.numOutBytes, 1024*90000/AUDIO_RATE, MP4E_SAMPLE_RANDOM_ACCESS);
         }
 #endif
     }
     if (alloc_buf)
         free(alloc_buf);
-    MP4E__close(mux);
+    MP4E_close(mux);
     if (fout)
         fclose(fout);
 }
