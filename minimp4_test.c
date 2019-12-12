@@ -60,33 +60,51 @@ static int write_callback(int64_t offset, const void *buffer, size_t size, void 
 
 int main(int argc, char **argv)
 {
-    if (argc < 2)
+    // check switches
+    int sequential_mode = 0;
+    int fragmentation_mode = 0;
+    int i;
+    for(i = 1; i < argc; i++)
     {
-        printf("usage: minimp4 in.h264 out.mp4\n");
+        if (argv[i][0] != '-')
+            break;
+        switch (argv[i][1])
+        {
+        case 's': sequential_mode = 1; break;
+        case 'f': fragmentation_mode = 1; break;
+        default:
+            printf("error: unrecognized option\n");
+            return 1;
+        }
+    }
+    if (argc <= (i + 1))
+    {
+        printf("Usage: minimp4 [options] in.h264 out.mp4\n"
+               "Options:\n"
+               "    -s    - enable sequential mode (no seek required for writing)\n"
+               "    -f    - enable fragmentation mode (aka fMP4)\n");
         return 0;
     }
     ssize_t h264_size;
     uint8_t *alloc_buf;
-    uint8_t *buf_h264 = alloc_buf = preload(argv[1], &h264_size);
+    uint8_t *buf_h264 = alloc_buf = preload(argv[i], &h264_size);
     if (!buf_h264)
     {
         printf("error: can't open h264 file\n");
         return 0;
     }
 
-    FILE *fout = fopen(argv[2], "wb");
+    FILE *fout = fopen(argv[i + 1], "wb");
     if (!fout)
     {
         printf("error: can't open output file\n");
         return 0;
     }
-    int is_hevc = (0 != strstr(argv[1], "265")) || (0 != strstr(argv[1], "hevc"));
+    int is_hevc = (0 != strstr(argv[1], "265")) || (0 != strstr(argv[i], "hevc"));
 
-    int sequential_mode = 0;
-    int enable_fragmentation = 0;
     MP4E_mux_t *mux;
     mp4_h26x_writer_t mp4wr;
-    mux = MP4E_open(sequential_mode, enable_fragmentation, fout, write_callback);
+    mux = MP4E_open(sequential_mode, fragmentation_mode, fout, write_callback);
     mp4_h26x_write_init(&mp4wr, mux, 352, 288, is_hevc);
 
 #if ENABLE_AUDIO
