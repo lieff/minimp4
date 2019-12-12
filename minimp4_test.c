@@ -105,7 +105,11 @@ int main(int argc, char **argv)
     MP4E_mux_t *mux;
     mp4_h26x_writer_t mp4wr;
     mux = MP4E_open(sequential_mode, fragmentation_mode, fout, write_callback);
-    mp4_h26x_write_init(&mp4wr, mux, 352, 288, is_hevc);
+    if (MP4E_STATUS_OK != mp4_h26x_write_init(&mp4wr, mux, 352, 288, is_hevc))
+    {
+        printf("error: mp4_h26x_write_init failed\n");
+        return 0;
+    }
 
 #if ENABLE_AUDIO
     ssize_t pcm_size;
@@ -158,7 +162,11 @@ int main(int argc, char **argv)
         int is_intra = (nal_type == 5);
         printf("nal size=%ld, nal_type=%d\n", nal_size, nal_type);*/
 
-        int ret = mp4_h26x_write_nal(&mp4wr, buf_h264, nal_size, 90000/VIDEO_FPS);
+        if (MP4E_STATUS_OK != mp4_h26x_write_nal(&mp4wr, buf_h264, nal_size, 90000/VIDEO_FPS))
+        {
+            printf("error: mp4_h26x_write_nal failed\n");
+            return 0;
+        }
         buf_h264  += nal_size;
         h264_size -= nal_size;
 
@@ -205,7 +213,11 @@ int main(int argc, char **argv)
             total_samples -= in_args.numInSamples;
             ats = (uint64_t)sample*90000/AUDIO_RATE;
 
-            MP4E_put_sample(mux, audio_track_id, buf, out_args.numOutBytes, 1024*90000/AUDIO_RATE, MP4E_SAMPLE_RANDOM_ACCESS);
+            if (MP4E_STATUS_OK != MP4E_put_sample(mux, audio_track_id, buf, out_args.numOutBytes, 1024*90000/AUDIO_RATE, MP4E_SAMPLE_RANDOM_ACCESS))
+            {
+                printf("error: MP4E_put_sample failed\n");
+                return 0;
+            }
         }
 #endif
     }
