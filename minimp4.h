@@ -269,11 +269,13 @@ typedef struct MP4D_demux_tag
     /************************************************************************/
     /*                 mandatory public data                                */
     /************************************************************************/
-    // number of tracks in the movie
-    unsigned track_count;
-
-    // track data (public/private)
+    int64_t read_pos;
+    int64_t read_size;
     MP4D_track_t *track;
+    int (*read_callback)(int64_t offset, void *buffer, size_t size, void *token);
+    void *token;
+
+    unsigned track_count; // number of tracks in the movie
 
 #if MP4D_INFO_SUPPORTED
     /************************************************************************/
@@ -344,7 +346,7 @@ int mp4_h26x_write_nal(mp4_h26x_writer_t *h, const unsigned char *nal, int lengt
 *   It is guaranteed that function will read/seek the file sequentially,
 *   and will never jump back.
 */
-int MP4D_open(MP4D_demux_t *mp4, FILE *f);
+int MP4D_open(MP4D_demux_t *mp4, int (*read_callback)(int64_t offset, void *buffer, size_t size, void *token), void *token, int64_t file_size);
 
 /**
 *   Return position and size for given sample from given track. The 'sample' is a
@@ -676,10 +678,9 @@ typedef struct MP4E_mux_tag
 {
     minimp4_vector_t tracks;
 
-    void *token;
     int64_t write_pos;
     int (*write_callback)(int64_t offset, const void *buffer, size_t size, void *token);
-
+    void *token;
     char *text_comment;
 
     int sequential_mode_flag;
@@ -1192,7 +1193,6 @@ static int mp4e_flush_index(MP4E_mux_t *mux)
         ERR(write_pending_data(mux, tr));
     }
 
-    // Allocate index memory
     base = (unsigned char*)malloc(index_bytes);
     if (!base)
         return MP4E_STATUS_NO_MEMORY;
@@ -1201,7 +1201,8 @@ static int mp4e_flush_index(MP4E_mux_t *mux)
     if (!mux->sequential_mode_flag)
     {
         // update size of mdat box.
-        // The only point, which requires random file access.
+        // One of 2 points, which requires random file access.
+        // Second is optonal duration update at beginning of file in fragmenatation mode.
         // This can be avoided using "till eof" size code, but in this case indexes must be
         // written before the mdat....
         int64_t size = mux->write_pos - sizeof(box_ftyp);
@@ -2409,34 +2410,31 @@ exit_with_free:
 
 #define NELEM(x)  (sizeof(x) / sizeof((x)[0]))
 
-static off_t minimp4_fsize(FILE *file)
+static int minimp4_fgets(MP4D_demux_t *mp4)
 {
-    if (fseek(file, 0, SEEK_END))
+    uint8_t c;
+    if (mp4->read_callback(mp4->read_pos, &c, 1, mp4->token))
         return -1;
-    off_t size = (off_t)ftell(file);
-    if (size < 0)
-        return -1;
-    if (fseek(file, 0, SEEK_SET))
-        return -1;
-    return size;
+    mp4->read_pos++;
+    return c;
 }
 
 /**
 *   Read given number of bytes from the file
 *   Used to read box headers
 */
-static unsigned minimp4_read(FILE *f, int nb, int *eof_flag)
+static unsigned minimp4_read(MP4D_demux_t *mp4, int nb, int *eof_flag)
 {
     uint32_t v = 0; int last_byte;
     switch (nb)
     {
-    case 4: v = (v << 8) | fgetc(f);
-    case 3: v = (v << 8) | fgetc(f);
-    case 2: v = (v << 8) | fgetc(f);
+    case 4: v = (v << 8) | minimp4_fgets(mp4);
+    case 3: v = (v << 8) | minimp4_fgets(mp4);
+    case 2: v = (v << 8) | minimp4_fgets(mp4);
     default:
-    case 1: v = (v << 8) | (last_byte = fgetc(f));
+    case 1: v = (v << 8) | (last_byte = minimp4_fgets(mp4));
     }
-    if (last_byte == EOF)
+    if (last_byte < 0)
     {
         *eof_flag = 1;
     }
@@ -2447,7 +2445,7 @@ static unsigned minimp4_read(FILE *f, int nb, int *eof_flag)
 *   Read given number of bytes, but no more than *payload_bytes specifies...
 *   Used to read box payload
 */
-static uint32_t read_payload(FILE *f, unsigned nb, boxsize_t *payload_bytes, int *eof_flag)
+static uint32_t read_payload(MP4D_demux_t *mp4, unsigned nb, boxsize_t *payload_bytes, int *eof_flag)
 {
     if (*payload_bytes < nb)
     {
@@ -2456,29 +2454,22 @@ static uint32_t read_payload(FILE *f, unsigned nb, boxsize_t *payload_bytes, int
     }
     *payload_bytes -= nb;
 
-    return minimp4_read(f, nb, eof_flag);
+    return minimp4_read(mp4, nb, eof_flag);
 }
 
 /**
 *   Skips given number of bytes.
 *   Avoid math operations with fpos_t
 */
-static void my_fseek(FILE *f, boxsize_t pos, int *eof_flag)
+static void my_fseek(MP4D_demux_t *mp4, boxsize_t pos, int *eof_flag)
 {
-    while (pos > 0)
-    {
-        long lpos = (long)MINIMP4_MIN(pos, (boxsize_t)LONG_MAX);
-        if (fseek(f, lpos, SEEK_CUR))
-        {
-            *eof_flag = 1;
-            return;
-        }
-        pos -= lpos;
-    }
+    mp4->read_pos += pos;
+    if (mp4->read_pos >= mp4->read_size)
+        *eof_flag = 1;
 }
 
-#define READ(n) read_payload(f, n, &payload_bytes, &eof_flag)
-#define SKIP(n) { boxsize_t t = MINIMP4_MIN(payload_bytes, n); my_fseek(f, t, &eof_flag); payload_bytes -= t; }
+#define READ(n) read_payload(mp4, n, &payload_bytes, &eof_flag)
+#define SKIP(n) { boxsize_t t = MINIMP4_MIN(payload_bytes, n); my_fseek(mp4, t, &eof_flag); payload_bytes -= t; }
 #define MALLOC(t, p, size) p = (t)malloc(size); if (!(p)) { ERROR("out of memory"); }
 
 /*
@@ -2486,7 +2477,6 @@ static void my_fseek(FILE *f, boxsize_t pos, int *eof_flag)
 */
 #define RETURN_ERROR(mess) {        \
     TRACE(("\nMP4 ERROR: " mess));  \
-    fseek(f, 0, SEEK_SET);          \
     MP4D_close(mp4);                \
     return 0;                       \
 }
@@ -2502,13 +2492,10 @@ static void my_fseek(FILE *f, boxsize_t pos, int *eof_flag)
 
 typedef enum { BOX_ATOM, BOX_OD } boxtype_t;
 
-// Exported API function
-int MP4D_open(MP4D_demux_t *mp4, FILE *f)
+int MP4D_open(MP4D_demux_t *mp4, int (*read_callback)(int64_t offset, void *buffer, size_t size, void *token), void *token, int64_t file_size)
 {
     // box stack size
     int depth = 0;
-
-    off_t file_size = minimp4_fsize(f);
 
     struct
     {
@@ -2529,18 +2516,16 @@ int MP4D_open(MP4D_demux_t *mp4, FILE *f)
     unsigned i;
     MP4D_track_t *tr = NULL;
 
-    if (!f || !mp4)
+    if (!mp4 || !read_callback)
     {
         TRACE(("\nERROR: invlaid arguments!"));
         return 0;
     }
 
-    if (fseek(f, 0, SEEK_SET))
-    {
-        return 0;
-    }
-
     memset(mp4, 0, sizeof(MP4D_demux_t));
+    mp4->read_callback = read_callback;
+    mp4->token = token;
+    mp4->read_size = file_size;
 
     stack[0].format = BOX_ATOM;   // start with atom box
     stack[0].bytes = 0;           // never accessed
@@ -2623,7 +2608,7 @@ int MP4D_open(MP4D_demux_t *mp4, FILE *f)
         // Read header box type and it's length
         if (stack[depth].format == BOX_ATOM)
         {
-            box_bytes = minimp4_read(f, 4, &eof_flag);
+            box_bytes = minimp4_read(mp4, 4, &eof_flag);
 #if FIX_BAD_ANDROID_META_BOX
 broken_android_meta_hack:
 #endif
@@ -2637,7 +2622,7 @@ broken_android_meta_hack:
                 ERROR("invalid box size (broken file?)");
             }
 
-            box_name  = minimp4_read(f, 4, &eof_flag);
+            box_name  = minimp4_read(mp4, 4, &eof_flag);
             read_bytes = 8;
 
             // Decode box size
@@ -2654,16 +2639,16 @@ broken_android_meta_hack:
             {
                 TRACE(("\n64-bit chunk encountered"));
 
-                box_bytes = minimp4_read(f, 4, &eof_flag);
+                box_bytes = minimp4_read(mp4, 4, &eof_flag);
 #if MP4D_64BIT_SUPPORTED
                 box_bytes <<= 32;
-                box_bytes |= minimp4_read(f, 4, &eof_flag);
+                box_bytes |= minimp4_read(mp4, 4, &eof_flag);
 #else
                 if (box_bytes)
                 {
                     ERROR("UNSUPPORTED FEATURE: MP4BoxHeader(): 64-bit boxes not supported!");
                 }
-                box_bytes = minimp4_read(f, 4, &eof_flag);
+                box_bytes = minimp4_read(mp4, 4, &eof_flag);
 #endif
                 if (box_bytes < 16)
                 {
@@ -2715,7 +2700,7 @@ broken_android_meta_hack:
         } else // stack[depth].format == BOX_OD
         {
             int val;
-            box_name = OD_BASE + minimp4_read(f, 1, &eof_flag);     // 1-byte box type
+            box_name = OD_BASE + minimp4_read(mp4, 1, &eof_flag);     // 1-byte box type
             read_bytes += 1;
             if (eof_flag)
             {
@@ -2726,7 +2711,7 @@ broken_android_meta_hack:
             box_bytes = 1;
             do
             {
-                val = minimp4_read(f, 1, &eof_flag);
+                val = minimp4_read(mp4, 1, &eof_flag);
                 read_bytes += 1;
                 if (eof_flag)
                 {
@@ -2839,7 +2824,6 @@ broken_android_meta_hack:
                         ts += d;
                     }
 #endif
-
                 }
             }
             break;
@@ -3071,7 +3055,7 @@ broken_android_meta_hack:
                 MALLOC(unsigned char*, tr->dsi, (int)payload_bytes);
                 for (i = 0; i < payload_bytes; i++)
                 {
-                    tr->dsi[i] = minimp4_read(f, 1, &eof_flag);    // These bytes available due to check above
+                    tr->dsi[i] = minimp4_read(mp4, 1, &eof_flag);    // These bytes available due to check above
                 }
                 tr->dsi_bytes = i;
                 payload_bytes -= i;
@@ -3165,7 +3149,6 @@ broken_android_meta_hack:
     {
         RETURN_ERROR("no tracks found");
     }
-    fseek(f, 0, SEEK_SET);
     return 1;
 }
 
@@ -3278,9 +3261,7 @@ static int skip_spspps(const unsigned char *p, int nbytes, int nskip)
     {
         unsigned segmbytes;
         if (k > nbytes - 2)
-        {
             return -1;
-        }
         segmbytes = p[k]*256 + p[k+1];
         k += 2 + segmbytes;
     }
@@ -3293,13 +3274,9 @@ static const void *MP4D_read_spspps(const MP4D_demux_t *mp4, unsigned int ntrack
     int bytepos = 0;
     unsigned char *p = mp4->track[ntrack].dsi;
     if (ntrack >= mp4->track_count)
-    {
         return NULL;
-    }
     if (mp4->track[ntrack].object_type_indication != MP4_OBJECT_TYPE_AVC)
-    {
         return NULL;    // SPS/PPS are specific for AVC format only
-    }
 
     if (pps_flag)
     {
@@ -3307,23 +3284,17 @@ static const void *MP4D_read_spspps(const MP4D_demux_t *mp4, unsigned int ntrack
         sps_count = p[bytepos++];
         skip_bytes = skip_spspps(p+bytepos, mp4->track[ntrack].dsi_bytes - bytepos, sps_count);
         if (skip_bytes < 0)
-        {
             return NULL;
-        }
         bytepos += skip_bytes;
     }
 
     // Skip sps/pps before the given target
     sps_count = p[bytepos++];
     if (nsps >= sps_count)
-    {
         return NULL;
-    }
     skip_bytes = skip_spspps(p+bytepos, mp4->track[ntrack].dsi_bytes - bytepos, nsps);
     if (skip_bytes < 0)
-    {
         return NULL;
-    }
     bytepos += skip_bytes;
     *sps_bytes = p[bytepos]*256 + p[bytepos+1];
     return p + bytepos + 2;
@@ -3401,12 +3372,9 @@ static const char *GetMP4ObjectTypeName(int objectTypeIndication)
     case 0xFF: return "no object type specified";
     default:
         if (objectTypeIndication >= 0xC0 && objectTypeIndication <= 0xFE)
-        {
             return "User private";
-        } else
-        {
+        else
             return "Reserved for ISO use";
-        }
     }
 }
 

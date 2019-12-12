@@ -58,11 +58,55 @@ static int write_callback(int64_t offset, const void *buffer, size_t size, void 
     return fwrite(buffer, 1, size, f) != size;
 }
 
+typedef struct
+{
+    uint8_t *buffer;
+    ssize_t size;
+} INPUT_BUFFER;
+
+static int read_callback(int64_t offset, void *buffer, size_t size, void *token)
+{
+    INPUT_BUFFER *buf = (INPUT_BUFFER*)token;
+    size_t to_copy = MINIMP4_MIN(size, buf->size - offset - size);
+    memcpy(buffer, buf->buffer + offset, to_copy);
+    return to_copy != size;
+}
+
+int demux(uint8_t *input_buf, ssize_t input_size, FILE *fout)
+{
+    int ntrack, i;
+    INPUT_BUFFER buf = { input_buf, input_size };
+    MP4D_demux_t mp4 = { 0, };
+    MP4D_open(&mp4, read_callback, &buf, input_size);
+
+    for (ntrack = 0; ntrack < mp4.track_count; ntrack++)
+    {
+        MP4D_track_t *tr = mp4.track + ntrack;
+        unsigned sum_duration = 0;
+        if (!(tr->handler_type == MP4D_HANDLER_TYPE_VIDE || tr->handler_type == MP4D_HANDLER_TYPE_SOUN) || ntrack > 0) /* currently take only 1st track and assume it h264 */
+            continue;
+        for (i = 0; i < mp4.track[ntrack].sample_count; i++)
+        {
+            unsigned frame_bytes, timestamp, duration;
+            MP4D_file_offset_t ofs = MP4D_frame_offset(&mp4, ntrack, i, &frame_bytes, &timestamp, &duration);
+            uint8_t *mem = input_buf + ofs;
+            mem[0] = 0; mem[1] = 0; mem[2] = 0; mem[3] = 1;
+            sum_duration += duration;
+            fwrite(mem, 1, frame_bytes, fout);
+        }
+    }
+
+    MP4D_close(&mp4);
+    if (input_buf)
+        free(input_buf);
+}
+
 int main(int argc, char **argv)
 {
     // check switches
     int sequential_mode = 0;
     int fragmentation_mode = 0;
+    int de_demux = 0;
     int i;
     for(i = 1; i < argc; i++)
     {
@@ -70,6 +114,8 @@ int main(int argc, char **argv)
             break;
         switch (argv[i][1])
         {
+        case 'm': de_demux = 0; break;
+        case 'd': de_demux = 1; break;
         case 's': sequential_mode = 1; break;
         case 'f': fragmentation_mode = 1; break;
         default:
@@ -79,10 +125,13 @@ int main(int argc, char **argv)
     }
     if (argc <= (i + 1))
     {
-        printf("Usage: minimp4 [options] in.h264 out.mp4\n"
+        printf("Usage: minimp4 [command] [options] input output\n"
+               "Commands:\n"
+               "    -m    - do muxing (default); input is h264 elementary stream, output is mp4 file\n"
+               "    -d    - do de-muxing; input is mp4 file, output is h264 elementary stream\n"
                "Options:\n"
-               "    -s    - enable sequential mode (no seek required for writing)\n"
-               "    -f    - enable fragmentation mode (aka fMP4)\n");
+               "    -s    - enable mux sequential mode (no seek required for writing)\n"
+               "    -f    - enable mux fragmentation mode (aka fMP4)\n");
         return 0;
     }
     ssize_t h264_size;
@@ -91,15 +140,19 @@ int main(int argc, char **argv)
     if (!buf_h264)
     {
         printf("error: can't open h264 file\n");
-        return 0;
+        exit(1);
     }
 
     FILE *fout = fopen(argv[i + 1], "wb");
     if (!fout)
     {
         printf("error: can't open output file\n");
-        return 0;
+        exit(1);
     }
+
+    if (de_demux)
+        return demux(alloc_buf, h264_size, fout);
+
     int is_hevc = (0 != strstr(argv[1], "265")) || (0 != strstr(argv[i], "hevc"));
 
     MP4E_mux_t *mux;
@@ -108,7 +161,7 @@ int main(int argc, char **argv)
     if (MP4E_STATUS_OK != mp4_h26x_write_init(&mp4wr, mux, 352, 288, is_hevc))
     {
         printf("error: mp4_h26x_write_init failed\n");
-        return 0;
+        exit(1);
     }
 
 #if ENABLE_AUDIO
@@ -118,7 +171,7 @@ int main(int argc, char **argv)
     if (!buf_pcm)
     {
         printf("error: can't open pcm file\n");
-        return 0;
+        exit(1);
     }
     uint32_t sample = 0, total_samples = pcm_size/2;
     uint64_t ts = 0, ats = 0;
@@ -165,7 +218,7 @@ int main(int argc, char **argv)
         if (MP4E_STATUS_OK != mp4_h26x_write_nal(&mp4wr, buf_h264, nal_size, 90000/VIDEO_FPS))
         {
             printf("error: mp4_h26x_write_nal failed\n");
-            return 0;
+            exit(1);
         }
         buf_h264  += nal_size;
         h264_size -= nal_size;
@@ -216,7 +269,7 @@ int main(int argc, char **argv)
             if (MP4E_STATUS_OK != MP4E_put_sample(mux, audio_track_id, buf, out_args.numOutBytes, 1024*90000/AUDIO_RATE, MP4E_SAMPLE_RANDOM_ACCESS))
             {
                 printf("error: MP4E_put_sample failed\n");
-                return 0;
+                exit(1);
             }
         }
 #endif
