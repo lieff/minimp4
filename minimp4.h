@@ -331,7 +331,7 @@ typedef struct
 } mp4_h26x_writer_t;
 
 int mp4_h26x_write_init(mp4_h26x_writer_t *h, MP4E_mux_t *mux, int width, int height, int is_hevc);
-int mp4_h26x_write_close(mp4_h26x_writer_t *h);
+void mp4_h26x_write_close(mp4_h26x_writer_t *h);
 int mp4_h26x_write_nal(mp4_h26x_writer_t *h, const unsigned char *nal, int length, unsigned timeStamp90kHz_next);
 
 /************************************************************************/
@@ -2198,7 +2198,7 @@ int mp4_h26x_write_init(mp4_h26x_writer_t *h, MP4E_mux_t *mux, int width, int he
     return MP4E_STATUS_OK;
 }
 
-int mp4_h26x_write_close(mp4_h26x_writer_t *h)
+void mp4_h26x_write_close(mp4_h26x_writer_t *h)
 {
 #if MINIMP4_TRANSCODE_SPS_ID
     h264_sps_id_patcher_t *p = &h->sps_patcher;

@@ -107,15 +107,28 @@ int demux(uint8_t *input_buf, ssize_t input_size, FILE *fout)
             unsigned frame_bytes, timestamp, duration;
             MP4D_file_offset_t ofs = MP4D_frame_offset(&mp4, ntrack, i, &frame_bytes, &timestamp, &duration);
             uint8_t *mem = input_buf + ofs;
-            mem[0] = 0; mem[1] = 0; mem[2] = 0; mem[3] = 1;
             sum_duration += duration;
-            fwrite(mem + USE_SHORT_SYNC, 1, frame_bytes - USE_SHORT_SYNC, fout);
+            while (frame_bytes)
+            {
+                uint32_t size = ((uint32_t)mem[0] << 24) | ((uint32_t)mem[1] << 16) | ((uint32_t)mem[2] << 8) | mem[3];
+                size += 4;
+                mem[0] = 0; mem[1] = 0; mem[2] = 0; mem[3] = 1;
+                fwrite(mem + USE_SHORT_SYNC, 1, size - USE_SHORT_SYNC, fout);
+                if (frame_bytes < size)
+                {
+                    printf("error: demux sample failed\n");
+                    exit(1);
+                }
+                frame_bytes -= size;
+                mem += size;
+            }
         }
     }
 
     MP4D_close(&mp4);
     if (input_buf)
         free(input_buf);
+    return 0;
 }
 
 int main(int argc, char **argv)

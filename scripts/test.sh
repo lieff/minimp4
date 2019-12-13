@@ -4,7 +4,11 @@ CUR_DIR=$(cd $(dirname ${CUR_DIR}); pwd)/$(basename ${CUR_DIR})/
 
 pushd $CUR_DIR/..
 
-./minimp4_x86 vectors/foreman.264 out.mp4
+test_executable() {
+
+EXEC=$1
+
+$EXEC vectors/foreman.264 out.mp4
 if ! cmp ./out.mp4 vectors/out_ref.mp4 >/dev/null 2>&1
 then
     echo test failed
@@ -12,7 +16,7 @@ then
 fi
 rm out.mp4
 
-./minimp4_x86 -s vectors/foreman.264 out.mp4
+$EXEC -s vectors/foreman.264 out.mp4
 if ! cmp ./out.mp4 vectors/out_sequential_ref.mp4 >/dev/null 2>&1
 then
     echo sequential test failed
@@ -20,7 +24,7 @@ then
 fi
 rm out.mp4
 
-./minimp4_x86 -f vectors/foreman.264 out.mp4
+$EXEC -f vectors/foreman.264 out.mp4
 if ! cmp ./out.mp4 vectors/out_fragmentation_ref.mp4 >/dev/null 2>&1
 then
     echo fragmentation test failed
@@ -28,7 +32,7 @@ then
 fi
 rm out.mp4
 
-./minimp4_x86 vectors/foreman_slices.264 out.mp4
+$EXEC vectors/foreman_slices.264 out.mp4
 if ! cmp ./out.mp4 vectors/out_slices_ref.mp4 >/dev/null 2>&1
 then
     echo slices test failed
@@ -36,36 +40,33 @@ then
 fi
 rm out.mp4
 
-qemu-arm ./minimp4_arm_gcc vectors/foreman.264 out.mp4
-if ! cmp ./out.mp4 vectors/out_ref.mp4 >/dev/null 2>&1
+$EXEC -d vectors/out_ref.mp4 out.h264
+if ! cmp ./out.h264 vectors/foreman.264 >/dev/null 2>&1
 then
-    echo test failed
+    echo demux test failed
     exit 1
 fi
-rm out.mp4
+rm out.h264
 
-qemu-arm ./minimp4_arm_gcc -s vectors/foreman.264 out.mp4
-if ! cmp ./out.mp4 vectors/out_sequential_ref.mp4 >/dev/null 2>&1
+$EXEC -d vectors/out_sequential_ref.mp4 out.h264
+if ! cmp ./out.h264 vectors/foreman.264 >/dev/null 2>&1
 then
-    echo sequential test failed
+    echo demux sequential test failed
     exit 1
 fi
-rm out.mp4
+rm out.h264
 
-qemu-arm ./minimp4_arm_gcc -f vectors/foreman.264 out.mp4
-if ! cmp ./out.mp4 vectors/out_fragmentation_ref.mp4 >/dev/null 2>&1
+$EXEC -d vectors/out_slices_ref.mp4 out.h264
+if ! cmp ./out.h264 vectors/foreman_slices.264 >/dev/null 2>&1
 then
-    echo fragmentation test failed
+    echo demux slices test failed
     exit 1
 fi
-rm out.mp4
+rm out.h264
 
-qemu-arm ./minimp4_arm_gcc vectors/foreman_slices.264 out.mp4
-if ! cmp ./out.mp4 vectors/out_slices_ref.mp4 >/dev/null 2>&1
-then
-    echo slices test failed
-    exit 1
-fi
-rm out.mp4
+}
+
+test_executable ./minimp4_x86
+test_executable "qemu-arm ./minimp4_arm_gcc"
 
 echo test passed
