@@ -331,6 +331,7 @@ typedef struct
 } mp4_h26x_writer_t;
 
 int mp4_h26x_write_init(mp4_h26x_writer_t *h, MP4E_mux_t *mux, int width, int height, int is_hevc);
+int mp4_h26x_write_close(mp4_h26x_writer_t *h);
 int mp4_h26x_write_nal(mp4_h26x_writer_t *h, const unsigned char *nal, int length, unsigned timeStamp90kHz_next);
 
 /************************************************************************/
@@ -2120,27 +2121,6 @@ static int transcode_nalu(h264_sps_id_patcher_t *h, const unsigned char *src, in
 
 #endif
 
-static void h264_sps_id_patcher_init(h264_sps_id_patcher_t *h)
-{
-    memset(h, 0, sizeof(h264_sps_id_patcher_t));
-}
-
-static void h264_sps_id_patcher_free(h264_sps_id_patcher_t *h)
-{
-    int i;
-    for (i = 0; i < MINIMP4_MAX_SPS; i++)
-    {
-        if (h->sps_cache[i])
-            free(h->sps_cache[i]);
-    }
-    for (i = 0; i < MINIMP4_MAX_PPS; i++)
-    {
-        if (h->pps_cache[i])
-            free(h->pps_cache[i]);
-    }
-    memset(h, 0, sizeof(h264_sps_id_patcher_t));
-}
-
 /**
 *   Set pointer just after start code (00 .. 00 01), or to EOF if not found:
 *
@@ -2213,9 +2193,28 @@ int mp4_h26x_write_init(mp4_h26x_writer_t *h, MP4E_mux_t *mux, int width, int he
     h->need_pps = 1;
     h->need_idr = 1;
 #if MINIMP4_TRANSCODE_SPS_ID
-    h264_sps_id_patcher_init(&h->sps_patcher);
+    memset(&h->sps_patcher, 0, sizeof(h264_sps_id_patcher_t));
 #endif
     return MP4E_STATUS_OK;
+}
+
+int mp4_h26x_write_close(mp4_h26x_writer_t *h)
+{
+#if MINIMP4_TRANSCODE_SPS_ID
+    h264_sps_id_patcher_t *p = &h->sps_patcher;
+    int i;
+    for (i = 0; i < MINIMP4_MAX_SPS; i++)
+    {
+        if (p->sps_cache[i])
+            free(p->sps_cache[i]);
+    }
+    for (i = 0; i < MINIMP4_MAX_PPS; i++)
+    {
+        if (p->pps_cache[i])
+            free(p->pps_cache[i]);
+    }
+#endif
+    memset(h, 0, sizeof(*h));
 }
 
 #define HEVC_NAL_VPS 32

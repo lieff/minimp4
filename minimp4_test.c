@@ -294,6 +294,7 @@ int main(int argc, char **argv)
     if (alloc_buf)
         free(alloc_buf);
     MP4E_close(mux);
+    mp4_h26x_write_close(&mp4wr);
     if (fout)
         fclose(fout);
 }
