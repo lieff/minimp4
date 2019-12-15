@@ -108,6 +108,13 @@ typedef boxsize_t MP4D_file_offset_t;
 // Used for private stream, as suggested in http://www.mp4ra.org/handler.html
 #define MP4E_HANDLER_TYPE_GESM                                  0x6765736D
 
+
+#define HEVC_NAL_VPS 32
+#define HEVC_NAL_SPS 33
+#define HEVC_NAL_PPS 34
+#define HEVC_NAL_BLA_W_LP 16
+#define HEVC_NAL_CRA_NUT  21
+
 /************************************************************************/
 /*          Data structures                                             */
 /************************************************************************/
@@ -896,9 +903,7 @@ int MP4E_set_dsi(MP4E_mux_t *mux, int track_id, const void *dsi, int bytes)
     assert(tr->info.track_media_kind == e_audio ||
            tr->info.track_media_kind == e_private);
     if (tr->vsps.bytes)
-    {
         return MP4E_STATUS_ONLY_ONE_DSI_ALLOWED;   // only one DSI allowed
-    }
     return append_mem(&tr->vsps, dsi, bytes) ? MP4E_STATUS_OK : MP4E_STATUS_NO_MEMORY;
 }
 
@@ -1459,6 +1464,8 @@ static int mp4e_flush_index(MP4E_mux_t *mux)
 
                         if (tr->info.track_media_kind == e_video && (MP4_OBJECT_TYPE_AVC == tr->info.object_type_indication || MP4_OBJECT_TYPE_HEVC == tr->info.object_type_indication))
                         {
+                            int numOfSequenceParameterSets = items_count(&tr->vsps);
+                            int numOfPictureParameterSets  = items_count(&tr->vpps);
                             if (MP4_OBJECT_TYPE_AVC == tr->info.object_type_indication)
                             {
                                 ATOM(BOX_avc1);
@@ -1493,8 +1500,6 @@ static int mp4e_flush_index(MP4E_mux_t *mux)
 
                             if (MP4_OBJECT_TYPE_AVC == tr->info.object_type_indication)
                             {
-                                unsigned int numOfSequenceParameterSets = items_count(&tr->vsps);
-                                unsigned int numOfPictureParameterSets  = items_count(&tr->vpps);
                                 ATOM(BOX_avcC);
                                 // AVCDecoderConfigurationRecord 5.2.4.1.1
                                 WRITE_1(1); // configurationVersion
@@ -1514,8 +1519,42 @@ static int mp4e_flush_index(MP4E_mux_t *mux)
                                 }
                             } else
                             {
+                                int numOfVPS  = items_count(&tr->vpps);
                                 ATOM(BOX_hvcC);
-                                // TODO: implement hvcC
+                                // TODO: read actual params from stream
+                                WRITE_1(1);    // configurationVersion
+                                WRITE_1(1);    // Profile Space (2), Tier (1), Profile (5)
+                                WRITE_4(0x60000000); // Profile Compatibility
+                                WRITE_2(0);    // progressive, interlaced, non packed constraint, frame only constraint flags
+                                WRITE_4(0);    // constraint indicator flags
+                                WRITE_1(0);    // level_idc
+                                WRITE_2(0xf000); // Min Spatial Segmentation
+                                WRITE_1(0xfc); // Parallelism Type
+                                WRITE_1(0xfc); // Chroma Format
+                                WRITE_1(0xf8); // Luma Depth
+                                WRITE_1(0xf8); // Chroma Depth
+                                WRITE_2(0);    // Avg Frame Rate
+                                WRITE_1(3);    // ConstantFrameRate (2), NumTemporalLayers (3), TemporalIdNested (1), LengthSizeMinusOne (2)
+
+                                WRITE_1(3);    // Num Of Arrays
+                                WRITE_1((1 << 7) | (HEVC_NAL_VPS & 0x3f)); // Array Completeness + NAL Unit Type
+                                WRITE_2(numOfVPS);
+                                for (i = 0; i < tr->vvps.bytes; i++)
+                                {
+                                    WRITE_1(tr->vvps.data[i]);
+                                }
+                                WRITE_1((1 << 7) | (HEVC_NAL_SPS & 0x3f));
+                                WRITE_2(numOfSequenceParameterSets);
+                                for (i = 0; i < tr->vsps.bytes; i++)
+                                {
+                                    WRITE_1(tr->vsps.data[i]);
+                                }
+                                WRITE_1((1 << 7) | (HEVC_NAL_PPS & 0x3f));
+                                WRITE_2(numOfPictureParameterSets);
+                                for (i = 0; i < tr->vpps.bytes; i++)
+                                {
+                                    WRITE_1(tr->vpps.data[i]);
+                                }
                             }
 
                             END_ATOM;
@@ -2216,12 +2255,6 @@ void mp4_h26x_write_close(mp4_h26x_writer_t *h)
 #endif
     memset(h, 0, sizeof(*h));
 }
-
-#define HEVC_NAL_VPS 32
-#define HEVC_NAL_SPS 33
-#define HEVC_NAL_PPS 34
-#define HEVC_NAL_BLA_W_LP 16
-#define HEVC_NAL_CRA_NUT  21
 
 static int mp4_h265_write_nal(mp4_h26x_writer_t *h, const unsigned char *nal, int sizeof_nal, unsigned timeStamp90kHz_next)
 {
