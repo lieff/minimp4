@@ -5,6 +5,28 @@ Mini MP4
 
 Easy embeddable MP4 mux/demux library.
 
+## Usage
+#### Muxing
+
+Muxing can be done using 3 modes.
+Default mode uses one big mdat chunk:
+
+![default](images/mux_mode_default.png?raw=true)
+
+This is most efficient mode, but disadvantage is that we need go back and patch mdat chunk size.
+This can be a problem in some cases, for example if stream transfered over network.
+To workaround this sequential mode is used:
+
+![default](images/mux_mode_sequential.png?raw=true)
+
+This mode do not make any backwards seek.
+And last mode is fragmented aka fMP4.
+
+![default](images/mux_mode_fragmented.png?raw=true)
+
+This mode stores track information first and spreads indexes across all stream, so decoding can start before whole stream available.
+This mode is sequential too and usually used by browsers and HLS streaming.
+
 ## Bindings
 
  * https://github.com/darkskygit/minimp4.rs - rust bindings
