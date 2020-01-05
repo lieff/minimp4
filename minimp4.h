@@ -428,7 +428,7 @@ int MP4E_add_track(MP4E_mux_t *mux, const MP4E_track_t *track_data);
 *   Example:
 *       MP4E_put_sample(mux, 0, data, data_bytes, duration, MP4E_SAMPLE_DEFAULT);
 */
-int MP4E_put_sample(MP4E_mux_t *mux, int track_num, void *data, int data_bytes, int duration, int kind);
+int MP4E_put_sample(MP4E_mux_t *mux, int track_num, const void *data, int data_bytes, int duration, int kind);
 
 /**
 *   Finalize MP4 file, de-allocated memory, and closes MP4 multiplexer.
@@ -1083,7 +1083,7 @@ static int mp4e_write_mdat_box(MP4E_mux_t *mux, uint32_t size)
 /**
 *   Add new sample to specified track
 */
-int MP4E_put_sample(MP4E_mux_t *mux, int track_num, void *data, int data_bytes, int duration, int kind)
+int MP4E_put_sample(MP4E_mux_t *mux, int track_num, const void *data, int data_bytes, int duration, int kind)
 {
     track_t *tr;
     if (!mux || !data)
