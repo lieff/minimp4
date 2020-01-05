@@ -17,7 +17,7 @@
 
 #ifdef __cplusplus
 extern "C" {
-#endif  //__cplusplus
+#endif
 
 #define MINIMP4_MIN(x, y) ((x) < (y) ? (x) : (y))
 
@@ -50,6 +50,7 @@ extern "C" {
 #define MP4D_PRINT_INFO_SUPPORTED 0
 
 #define MP4D_AVC_SUPPORTED        1
+#define MP4D_HEVC_SUPPORTED       1
 #define MP4D_TIMESTAMPS_SUPPORTED 1
 
 /************************************************************************/
@@ -348,7 +349,6 @@ int mp4_h26x_write_nal(mp4_h26x_writer_t *h, const unsigned char *nal, int lengt
 /**
 *   Parse given input stream as MP4 file. Allocate and store data indexes.
 *   return 1 on success, 0 on failure
-*   Given file rewind()'ed on return.
 *   The MP4 indexes may be stored at the end of stream, so this
 *   function may parse all stream.
 *   It is guaranteed that function will read/seek sequentially,
@@ -394,7 +394,7 @@ const void *MP4D_read_pps(const MP4D_demux_t *mp4, unsigned int ntrack, int npps
 *   Given as implementation example and for test purposes
 */
 void MP4D_printf_info(const MP4D_demux_t *mp4);
-#endif  // #if MP4D_PRINT_INFO_SUPPORTED
+#endif
 
 /**
 *   Allocates and initialize mp4 multiplexor
@@ -478,11 +478,9 @@ int MP4E_set_pps(MP4E_mux_t *mux, int track_id, const void *pps, int bytes);
 */
 int MP4E_set_text_comment(MP4E_mux_t *mux, const char *comment);
 
-
 #ifdef __cplusplus
 }
-#endif //__cplusplus
-
+#endif
 #endif //MINIMP4_H
 
 #if defined(MINIMP4_IMPLEMENTATION) && !defined(MINIMP4_IMPLEMENTATION_GUARD)
@@ -1015,12 +1013,12 @@ static int mp4e_write_fragment_header(MP4E_mux_t *mux, int track_num, int data_b
             flags =  (tr->info.track_media_kind == e_video) ? 0x20020 : 0x20008;
 
             ATOM_FULL(BOX_tfhd, flags)
-                WRITE_4(track_num + 1);     // track_ID
+                WRITE_4(track_num + 1); // track_ID
                 if (tr->info.track_media_kind == e_video)
                 {
                     flags  = 0x001;     // data-offset-present
                     flags |= 0x100;     // sample-duration-present
-                    WRITE_4(0x1010000);     // default_sample_flags
+                    WRITE_4(0x1010000); // default_sample_flags
                 } else
                 {
                     WRITE_4(duration);
@@ -2505,7 +2503,7 @@ static void my_fseek(MP4D_demux_t *mp4, boxsize_t pos, int *eof_flag)
 #define MALLOC(t, p, size) p = (t)malloc(size); if (!(p)) { ERROR("out of memory"); }
 
 /*
-*   On error: release resources, rewind the file.
+*   On error: release resources.
 */
 #define RETURN_ERROR(mess) {        \
     TRACE(("\nMP4 ERROR: " mess));  \
@@ -2609,6 +2607,7 @@ int MP4D_open(MP4D_demux_t *mp4, int (*read_callback)(int64_t offset, void *buff
             {OD_DSI,   BOX_OD},
             {BOX_trak, BOX_ATOM},
             {BOX_moov, BOX_ATOM},
+            //{BOX_moof, BOX_ATOM},
             {BOX_mdia, BOX_ATOM},
             {BOX_tref, BOX_ATOM},
             {BOX_minf, BOX_ATOM},
@@ -2620,8 +2619,11 @@ int MP4D_open(MP4D_demux_t *mp4, int (*read_callback)(int64_t offset, void *buff
 #if MP4D_AVC_SUPPORTED
             {BOX_mp4v, BOX_ATOM},
             {BOX_avc1, BOX_ATOM},
-//             {BOX_avc2, BOX_ATOM},
-//             {BOX_svc1, BOX_ATOM},
+            //{BOX_avc2, BOX_ATOM},
+            //{BOX_svc1, BOX_ATOM},
+#endif
+#if MP4D_HEVC_SUPPORTED
+            {BOX_hvc1, BOX_ATOM},
 #endif
             {BOX_udta, BOX_ATOM},
             {BOX_meta, BOX_ATOM},
@@ -2645,9 +2647,7 @@ int MP4D_open(MP4D_demux_t *mp4, int (*read_callback)(int64_t offset, void *buff
 broken_android_meta_hack:
 #endif
             if (eof_flag)
-            {
                 break;  // normal exit
-            }
 
             if (box_bytes >= 2 && box_bytes < 8)
             {
@@ -2735,9 +2735,7 @@ broken_android_meta_hack:
             box_name = OD_BASE + minimp4_read(mp4, 1, &eof_flag);     // 1-byte box type
             read_bytes += 1;
             if (eof_flag)
-            {
                 break;
-            }
 
             payload_bytes = 0;
             box_bytes = 1;
@@ -2790,8 +2788,7 @@ broken_android_meta_hack:
                     if (box_name == BOX_stsz)
                     {
                        tr->entry_size[i] = (sample_size?sample_size:READ(4));
-                    }
-                    else
+                    } else
                     {
                         switch (sample_size & 0xFF)
                         {
