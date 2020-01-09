@@ -325,7 +325,7 @@ typedef struct
     int pps_bytes[MINIMP4_MAX_PPS];
 
     int map_sps[MINIMP4_MAX_SPS];
-    int map_pps[MINIMP4_MAX_SPS];
+    int map_pps[MINIMP4_MAX_PPS];
 
 } h264_sps_id_patcher_t;
 
