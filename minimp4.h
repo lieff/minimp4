@@ -1016,8 +1016,6 @@ static int mp4e_write_fragment_header(MP4E_mux_t *mux, int track_num, int data_b
                 WRITE_4(track_num + 1); // track_ID
                 if (tr->info.track_media_kind == e_video)
                 {
-                    flags  = 0x001;     // data-offset-present
-                    flags |= 0x100;     // sample-duration-present
                     WRITE_4(0x1010000); // default_sample_flags
                 } else
                 {
@@ -1032,7 +1030,7 @@ static int mp4e_write_fragment_header(MP4E_mux_t *mux, int track_num, int data_b
                 ATOM_FULL(BOX_trun, flags)
                     WRITE_4(1);         // sample_count
                     pdata_offset = p; p += 4;  // save ptr to data_offset
-                    WRITE_4(duration);  // sample_duration
+                    WRITE_4(data_bytes);// sample_size
                 END_ATOM
             } else if (kind == MP4E_SAMPLE_RANDOM_ACCESS)
             {

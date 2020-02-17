@@ -254,6 +254,9 @@ int main(int argc, char **argv)
         h264_size -= nal_size;
 
 #if ENABLE_AUDIO
+        if (fragmentation_mode && !mux->fragments_count)
+            continue; /* make sure mp4_h26x_write_nal writes sps/pps, because in fragmentation mode first MP4E_put_sample writes moov with track information and dsi.
+                         all tracks dsi must be set (MP4E_set_dsi) before first MP4E_put_sample. */
         ts += 90000/VIDEO_FPS;
         while (ats < ts)
         {
@@ -304,6 +307,11 @@ int main(int argc, char **argv)
         }
 #endif
     }
+#if ENABLE_AUDIO
+    if (alloc_pcm)
+        free(alloc_pcm);
+    aacEncClose(&aacenc);
+#endif
     if (alloc_buf)
         free(alloc_buf);
     MP4E_close(mux);
