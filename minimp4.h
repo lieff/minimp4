@@ -2316,6 +2316,8 @@ int mp4_h26x_write_nal(mp4_h26x_writer_t *h, const unsigned char *nal, int lengt
             continue;
         }
         payload_type = nal[0] & 31;
+        if (9 == payload_type)
+            return; /* access unit delimiter */
 #if MINIMP4_TRANSCODE_SPS_ID
         // Transcode SPS, PPS and slice headers, reassigning ID's for SPS and  PPS:
         // - assign unique ID's to different SPS and PPS
