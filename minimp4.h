@@ -2172,7 +2172,7 @@ static const uint8_t *find_start_code(const uint8_t *h264_data, int h264_data_by
     {
         int zero_cnt = 1;
         const uint8_t* found = (uint8_t*)memchr(p, 0, eof - p);
-        p = (found != nullptr) ? found : eof;
+        p = found ? found : eof;
         while (p + zero_cnt < eof && !p[zero_cnt]) zero_cnt++;
         if (zero_cnt >= 2 && p[zero_cnt] == 1)
         {
