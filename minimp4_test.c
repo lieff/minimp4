@@ -72,55 +72,98 @@ static int read_callback(int64_t offset, void *buffer, size_t size, void *token)
     return to_copy != size;
 }
 
-int demux(uint8_t *input_buf, ssize_t input_size, FILE *fout)
+int demux(uint8_t *input_buf, ssize_t input_size, FILE *fout, int ntrack)
 {
-    int ntrack, i, spspps_bytes;
+    int /*ntrack, */i, spspps_bytes;
     const void *spspps;
     INPUT_BUFFER buf = { input_buf, input_size };
     MP4D_demux_t mp4 = { 0, };
     MP4D_open(&mp4, read_callback, &buf, input_size);
 
-    for (ntrack = 0; ntrack < mp4.track_count; ntrack++)
+    //for (ntrack = 0; ntrack < mp4.track_count; ntrack++)
     {
         MP4D_track_t *tr = mp4.track + ntrack;
         unsigned sum_duration = 0;
-        if (!(tr->handler_type == MP4D_HANDLER_TYPE_VIDE || tr->handler_type == MP4D_HANDLER_TYPE_SOUN) || ntrack > 0) /* currently take only 1st track and assume it h264 */
-            continue;
         i = 0;
+        if (tr->handler_type == MP4D_HANDLER_TYPE_VIDE)
+        {   // assume h264
 #define USE_SHORT_SYNC 0
-        char sync[4] = { 0, 0, 0, 1 };
-        while (spspps = MP4D_read_sps(&mp4, ntrack, i, &spspps_bytes))
-        {
-            fwrite(sync + USE_SHORT_SYNC, 1, 4 - USE_SHORT_SYNC, fout);
-            fwrite(spspps, 1, spspps_bytes, fout);
-            i++;
-        }
-        i = 0;
-        while (spspps = MP4D_read_pps(&mp4, ntrack, i, &spspps_bytes))
-        {
-            fwrite(sync + USE_SHORT_SYNC, 1, 4 - USE_SHORT_SYNC, fout);
-            fwrite(spspps, 1, spspps_bytes, fout);
-            i++;
-        }
-        for (i = 0; i < mp4.track[ntrack].sample_count; i++)
-        {
-            unsigned frame_bytes, timestamp, duration;
-            MP4D_file_offset_t ofs = MP4D_frame_offset(&mp4, ntrack, i, &frame_bytes, &timestamp, &duration);
-            uint8_t *mem = input_buf + ofs;
-            sum_duration += duration;
-            while (frame_bytes)
+            char sync[4] = { 0, 0, 0, 1 };
+            while (spspps = MP4D_read_sps(&mp4, ntrack, i, &spspps_bytes))
             {
-                uint32_t size = ((uint32_t)mem[0] << 24) | ((uint32_t)mem[1] << 16) | ((uint32_t)mem[2] << 8) | mem[3];
-                size += 4;
-                mem[0] = 0; mem[1] = 0; mem[2] = 0; mem[3] = 1;
-                fwrite(mem + USE_SHORT_SYNC, 1, size - USE_SHORT_SYNC, fout);
-                if (frame_bytes < size)
+                fwrite(sync + USE_SHORT_SYNC, 1, 4 - USE_SHORT_SYNC, fout);
+                fwrite(spspps, 1, spspps_bytes, fout);
+                i++;
+            }
+            i = 0;
+            while (spspps = MP4D_read_pps(&mp4, ntrack, i, &spspps_bytes))
+            {
+                fwrite(sync + USE_SHORT_SYNC, 1, 4 - USE_SHORT_SYNC, fout);
+                fwrite(spspps, 1, spspps_bytes, fout);
+                i++;
+            }
+            for (i = 0; i < mp4.track[ntrack].sample_count; i++)
+            {
+                unsigned frame_bytes, timestamp, duration;
+                MP4D_file_offset_t ofs = MP4D_frame_offset(&mp4, ntrack, i, &frame_bytes, &timestamp, &duration);
+                uint8_t *mem = input_buf + ofs;
+                sum_duration += duration;
+                while (frame_bytes)
                 {
-                    printf("error: demux sample failed\n");
+                    uint32_t size = ((uint32_t)mem[0] << 24) | ((uint32_t)mem[1] << 16) | ((uint32_t)mem[2] << 8) | mem[3];
+                    size += 4;
+                    mem[0] = 0; mem[1] = 0; mem[2] = 0; mem[3] = 1;
+                    fwrite(mem + USE_SHORT_SYNC, 1, size - USE_SHORT_SYNC, fout);
+                    if (frame_bytes < size)
+                    {
+                        printf("error: demux sample failed\n");
+                        exit(1);
+                    }
+                    frame_bytes -= size;
+                    mem += size;
+                }
+            }
+        } else if (tr->handler_type == MP4D_HANDLER_TYPE_SOUN)
+        {   // assume aac
+#if ENABLE_AUDIO
+            HANDLE_AACDECODER dec = aacDecoder_Open(TT_MP4_RAW, 1);
+            UCHAR *dsi = (UCHAR *)tr->dsi;
+            UINT dsi_size = tr->dsi_bytes;
+            if (AAC_DEC_OK != aacDecoder_ConfigRaw(dec, &dsi, &dsi_size))
+            {
+                printf("error: aac config fail\n");
+                exit(1);
+            }
+#endif
+            for (i = 0; i < mp4.track[ntrack].sample_count; i++)
+            {
+                unsigned frame_bytes, timestamp, duration;
+                MP4D_file_offset_t ofs = MP4D_frame_offset(&mp4, ntrack, i, &frame_bytes, &timestamp, &duration);
+                printf("ofs=%d frame_bytes=%d timestamp=%d duration=%d\n", (unsigned)ofs, frame_bytes, timestamp, duration);
+#if ENABLE_AUDIO
+                UCHAR *frame = (UCHAR *)(input_buf + ofs);
+                UINT frame_size = frame_bytes;
+                UINT valid = frame_size;
+                if (AAC_DEC_OK != aacDecoder_Fill(dec, &frame, &frame_size, &valid))
+                {
+                    printf("error: aac decode fail\n");
                     exit(1);
                 }
-                frame_bytes -= size;
-                mem += size;
+                INT_PCM pcm[2048*8];
+                int err = aacDecoder_DecodeFrame(dec, pcm, sizeof(pcm), 0);
+                if (AAC_DEC_OK != err)
+                {
+                    printf("error: aac decode fail %d\n", err);
+                    exit(1);
+                }
+                CStreamInfo *info = aacDecoder_GetStreamInfo(dec);
+                if (!info)
+                {
+                    printf("error: aac decode fail\n");
+                    exit(1);
+                }
+                fwrite(pcm, sizeof(INT_PCM)*info->frameSize*info->numChannels, 1, fout);
+#endif
             }
         }
     }
@@ -137,6 +180,7 @@ int main(int argc, char **argv)
     int sequential_mode = 0;
     int fragmentation_mode = 0;
     int do_demux = 0;
+    int track = 0;
     int i;
     for(i = 1; i < argc; i++)
     {
@@ -148,6 +192,7 @@ int main(int argc, char **argv)
         case 'd': do_demux = 1; break;
         case 's': sequential_mode = 1; break;
         case 'f': fragmentation_mode = 1; break;
+        case 't': i++; if (i < argc) track = atoi(argv[i]); break;
         default:
             printf("error: unrecognized option\n");
             return 1;
@@ -161,7 +206,8 @@ int main(int argc, char **argv)
                "    -d    - do de-muxing; input is mp4 file, output is h264 elementary stream\n"
                "Options:\n"
                "    -s    - enable mux sequential mode (no seek required for writing)\n"
-               "    -f    - enable mux fragmentation mode (aka fMP4)\n");
+               "    -f    - enable mux fragmentation mode (aka fMP4)\n"
+               "    -t    - de-mux tack number\n");
         return 0;
     }
     ssize_t h264_size;
@@ -181,7 +227,7 @@ int main(int argc, char **argv)
     }
 
     if (do_demux)
-        return demux(alloc_buf, h264_size, fout);
+        return demux(alloc_buf, h264_size, fout, track);
 
     int is_hevc = (0 != strstr(argv[1], "265")) || (0 != strstr(argv[i], "hevc"));
 
