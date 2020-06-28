@@ -53,6 +53,9 @@ extern "C" {
 #define MP4D_HEVC_SUPPORTED       1
 #define MP4D_TIMESTAMPS_SUPPORTED 1
 
+// Enable TrackFragmentBaseMediaDecodeTimeBox support
+#define MP4D_TFDT_SUPPORT         0
+
 /************************************************************************/
 /*          Some values of MP4(E/D)_track_t->object_type_indication     */
 /************************************************************************/
@@ -580,6 +583,7 @@ enum
     BOX_mfhd    = FOUR_CHAR_INT( 'm', 'f', 'h', 'd' ),//MovieFragmentHeaderAtomType
     BOX_traf    = FOUR_CHAR_INT( 't', 'r', 'a', 'f' ),//TrackFragmentAtomType
     BOX_tfhd    = FOUR_CHAR_INT( 't', 'f', 'h', 'd' ),//TrackFragmentHeaderAtomType
+    BOX_tfdt    = FOUR_CHAR_INT( 't', 'f', 'd', 't' ),//TrackFragmentBaseMediaDecodeTimeBox
     BOX_trun    = FOUR_CHAR_INT( 't', 'r', 'u', 'n' ),//TrackFragmentRunAtomType
     BOX_mehd    = FOUR_CHAR_INT( 'm', 'e', 'h', 'd' ),//MovieExtendsHeaderBox
 
@@ -985,7 +989,11 @@ static int mp4e_flush_index(MP4E_mux_t *mux);
 /**
 *   Write Movie Fragment: 'moof' box
 */
-static int mp4e_write_fragment_header(MP4E_mux_t *mux, int track_num, int data_bytes, int duration, int kind)
+static int mp4e_write_fragment_header(MP4E_mux_t *mux, int track_num, int data_bytes, int duration, int kind
+#if MP4D_TFDT_SUPPORT
+, uint64_t timestamp
+#endif
+)
 {
     unsigned char base[888], *p = base;
     unsigned char *stack_base[20]; // atoms nesting stack
@@ -1022,6 +1030,12 @@ static int mp4e_write_fragment_header(MP4E_mux_t *mux, int track_num, int data_b
                     WRITE_4(duration);
                 }
             END_ATOM
+            #if MP4D_TFDT_SUPPORT
+            ATOM_FULL(BOX_tfdt, 0x01000000) // version 1
+                WRITE_4(timestamp >> 32); // upper timestamp
+                WRITE_4(timestamp & 0xffffffff); // lower timestamp
+            END_ATOM
+            #endif
             if (tr->info.track_media_kind == e_audio)
             {
                 flags  = 0;
@@ -1090,10 +1104,18 @@ int MP4E_put_sample(MP4E_mux_t *mux, int track_num, const void *data, int data_b
 
     if (mux->enable_fragmentation)
     {
+        #if MP4D_TFDT_SUPPORT
+        // NOTE: assume a constant `duration` to calculate current timestamp
+        uint64_t timestamp = (uint64_t)mux->fragments_count * duration;
+        #endif
         if (!mux->fragments_count++)
             ERR(mp4e_flush_index(mux)); // write file headers before 1st sample
         // write MOOF + MDAT + sample data
-        ERR(mp4e_write_fragment_header(mux, track_num, data_bytes, duration, kind));
+        ERR(mp4e_write_fragment_header(mux, track_num, data_bytes, duration, kind
+        #if MP4D_TFDT_SUPPORT
+        , timestamp
+        #endif
+        ));
         // write MDAT box for each sample
         ERR(mp4e_write_mdat_box(mux, data_bytes + 8));
         ERR(mux->write_callback(mux->write_pos, data, data_bytes, mux->token));
