@@ -332,7 +332,7 @@ typedef struct
 
 } h264_sps_id_patcher_t;
 
-typedef struct
+typedef struct mp4_h26x_writer_tag
 {
 #if MINIMP4_TRANSCODE_SPS_ID
     h264_sps_id_patcher_t sps_patcher;
