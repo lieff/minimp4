@@ -1111,11 +1111,11 @@ int MP4E_put_sample(MP4E_mux_t *mux, int track_num, const void *data, int data_b
         if (!mux->fragments_count++)
             ERR(mp4e_flush_index(mux)); // write file headers before 1st sample
         // write MOOF + MDAT + sample data
-        ERR(mp4e_write_fragment_header(mux, track_num, data_bytes, duration, kind
         #if MP4D_TFDT_SUPPORT
-        , timestamp
+        ERR(mp4e_write_fragment_header(mux, track_num, data_bytes, duration, kind, timestamp));
+        #else
+        ERR(mp4e_write_fragment_header(mux, track_num, data_bytes, duration, kind));
         #endif
-        ));
         // write MDAT box for each sample
         ERR(mp4e_write_mdat_box(mux, data_bytes + 8));
         ERR(mux->write_callback(mux->write_pos, data, data_bytes, mux->token));
