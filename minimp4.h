@@ -1226,7 +1226,7 @@ static int mp4e_flush_index(MP4E_mux_t *mux)
     {
         // update size of mdat box.
         // One of 2 points, which requires random file access.
-        // Second is optonal duration update at beginning of file in fragmenatation mode.
+        // Second is optional duration update at beginning of file in fragmentation mode.
         // This can be avoided using "till eof" size code, but in this case indexes must be
         // written before the mdat....
         int64_t size = mux->write_pos - sizeof(box_ftyp);

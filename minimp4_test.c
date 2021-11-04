@@ -229,7 +229,7 @@ int main(int argc, char **argv)
     if (do_demux)
         return demux(alloc_buf, h264_size, fout, track);
 
-    int is_hevc = (0 != strstr(argv[1], "265")) || (0 != strstr(argv[i], "hevc"));
+    int is_hevc = (0 != strstr(argv[i], "265")) || (0 != strstr(argv[i], "hevc"));
 
     MP4E_mux_t *mux;
     mp4_h26x_writer_t mp4wr;
