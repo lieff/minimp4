@@ -259,9 +259,11 @@ typedef struct
     union
     {
         struct {
+            unsigned char configurationVersion;
             unsigned char AVCProfileIndication;
             unsigned char profile_compatibility;
             unsigned char AVCLevelIndication;
+            unsigned char lengthSizeMinusOne;
         } avc1;
     } CodecDescription;
 #endif
@@ -3063,15 +3065,15 @@ broken_android_meta_hack:
                 //bit(6) reserved =
                 unsigned int lengthSizeMinusOne = READ(1) & 3;
 
-                (void)configurationVersion;
+                tr->CodecDescription.avc1.configurationVersion = configurationVersion;
                 tr->CodecDescription.avc1.AVCProfileIndication = AVCProfileIndication;
                 tr->CodecDescription.avc1.profile_compatibility = profile_compatibility;
                 tr->CodecDescription.avc1.AVCLevelIndication = AVCLevelIndication;
-                (void)lengthSizeMinusOne;
+                tr->CodecDescription.avc1.lengthSizeMinusOne = lengthSizeMinusOne;
 
                 for (spspps = 0; spspps < 2; spspps++)
                 {
-                    unsigned int numOfSequenceParameterSets= READ(1);
+                    unsigned int numOfSequenceParameterSets = READ(1);
                     if (!spspps)
                     {
                          numOfSequenceParameterSets &= 31;  // clears 3 msb for SPS
