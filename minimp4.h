@@ -255,6 +255,15 @@ typedef struct
             unsigned height;
         } video;
     } SampleDescription;
+
+    union
+    {
+        struct {
+            unsigned char AVCProfileIndication;
+            unsigned char profile_compatibility;
+            unsigned char AVCLevelIndication;
+        } avc1;
+    } CodecDescription;
 #endif
 
     /************************************************************************/
@@ -3055,9 +3064,9 @@ broken_android_meta_hack:
                 unsigned int lengthSizeMinusOne = READ(1) & 3;
 
                 (void)configurationVersion;
-                (void)AVCProfileIndication;
-                (void)profile_compatibility;
-                (void)AVCLevelIndication;
+                tr->CodecDescription.avc1.AVCProfileIndication = AVCProfileIndication;
+                tr->CodecDescription.avc1.profile_compatibility = profile_compatibility;
+                tr->CodecDescription.avc1.AVCLevelIndication = AVCLevelIndication;
                 (void)lengthSizeMinusOne;
 
                 for (spspps = 0; spspps < 2; spspps++)
