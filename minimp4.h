@@ -268,6 +268,9 @@ typedef struct
     unsigned chunk_count;
     MP4D_file_offset_t *chunk_offset;
 
+    unsigned *syncsamples;
+    unsigned syncsamples_count;
+
 #if MP4D_TIMESTAMPS_SUPPORTED
     unsigned *timestamp;
     unsigned *duration;
@@ -366,10 +369,16 @@ int MP4D_open(MP4D_demux_t *mp4, int (*read_callback)(int64_t offset, void *buff
 *   frame_bytes [OUT]   - return coded frame size in bytes
 *   timestamp [OUT]     - return frame timestamp (in mp4->timescale units)
 *   duration [OUT]      - return frame duration (in mp4->timescale units)
+*   is_sync [OUT]       - return if frame is a sync frame
 *
 *   function return offset for the frame
 */
-MP4D_file_offset_t MP4D_frame_offset(const MP4D_demux_t *mp4, unsigned int ntrack, unsigned int nsample, unsigned int *frame_bytes, unsigned *timestamp, unsigned *duration);
+MP4D_file_offset_t MP4D_frame_offset(const MP4D_demux_t *mp4, unsigned int ntrack, unsigned int nsample, unsigned int *frame_bytes, unsigned *timestamp, unsigned *duration, int *is_sync);
+
+/**
+*   Find the nearest sync frame.
+*/
+unsigned MP4D_nearest_sync_frame(const MP4D_demux_t *mp4, unsigned ntrack, unsigned nsample);
 
 /**
 *   De-allocated memory
@@ -2840,6 +2849,19 @@ broken_android_meta_hack:
                 SKIP(4);    // sample_description_index
             }
             break;
+        case BOX_stss:
+            {
+                unsigned version_flags = READ(4); // currently 0
+                (void)version_flags;
+                unsigned count = READ(4);
+                tr->syncsamples_count = count;
+                MALLOC(unsigned int*, tr->syncsamples, count * sizeof(unsigned int));
+                for (i = 0; i < count; i++) {
+                    unsigned sample = READ(4) - 1; // 1-based
+                    tr->syncsamples[i] = sample;
+                }
+            }
+            break;
 #if MP4D_TRACE_TIMESTAMPS || MP4D_TIMESTAMPS_SUPPORTED
         case BOX_stts:
             {
@@ -3229,8 +3251,23 @@ static int sample_to_chunk(MP4D_track_t *tr, unsigned nsample, unsigned *nfirst_
     return -1;
 }
 
+/**
+*   Find the nearest sync sample, given a sample.
+*   The sync sample is less or equal the given sample.
+*/
+static int nearest_sync_sample(MP4D_track_t *tr, unsigned nsample)
+{
+    int i;
+    for (i = tr->syncsamples_count - 1; i >= 0; i--) {
+        if (nsample >= tr->syncsamples[i]) {
+            return tr->syncsamples[i];
+        }
+    }
+    return -1;
+}
+
 // Exported API function
-MP4D_file_offset_t MP4D_frame_offset(const MP4D_demux_t *mp4, unsigned ntrack, unsigned nsample, unsigned *frame_bytes, unsigned *timestamp, unsigned *duration)
+MP4D_file_offset_t MP4D_frame_offset(const MP4D_demux_t *mp4, unsigned ntrack, unsigned nsample, unsigned *frame_bytes, unsigned *timestamp, unsigned *duration, int *is_sync)
 {
     MP4D_track_t *tr = mp4->track + ntrack;
     unsigned ns;
@@ -3268,7 +3305,21 @@ MP4D_file_offset_t MP4D_frame_offset(const MP4D_demux_t *mp4, unsigned ntrack, u
 #endif
     }
 
+    if (is_sync) {
+        int nearest = nearest_sync_sample(tr, nsample);
+        if (nearest >= 0) {
+            *is_sync = (unsigned int)nearest == nsample;
+        }
+    }
+
     return offset;
+}
+
+// Exported API function
+unsigned MP4D_nearest_sync_frame(const MP4D_demux_t *mp4, unsigned ntrack, unsigned nsample)
+{
+    MP4D_track_t *tr = mp4->track + ntrack;
+    return nearest_sync_sample(tr, nsample);
 }
 
 #define FREE(x) if (x) {free(x); x = NULL;}
