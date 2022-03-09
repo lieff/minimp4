@@ -859,16 +859,6 @@ int MP4E_add_track(MP4E_mux_t *mux, const MP4E_track_t *track_data)
     return ntr;
 }
 
-static const unsigned char *next_dsi(const unsigned char *p, const unsigned char *end, int *bytes)
-{
-    if (p < end + 2)
-    {
-        *bytes = p[0]*256 + p[1];
-        return p + 2;
-    } else
-        return NULL;
-}
-
 static int append_mem(minimp4_vector_t *v, const void *mem, int bytes)
 {
     int i;
@@ -944,7 +934,7 @@ static unsigned get_duration(const track_t *tr)
 static int write_pending_data(MP4E_mux_t *mux, track_t *tr)
 {
     // if have pending sample && have at least one sample in the index
-    if (tr->pending_sample.bytes > 0 && tr->smpl.bytes >= sizeof(sample_t))
+    if (tr->pending_sample.bytes > 0 && (size_t)tr->smpl.bytes >= sizeof(sample_t))
     {
         // Complete pending sample
         sample_t *smpl_desc;
@@ -1005,6 +995,7 @@ static int mp4e_write_fragment_header(MP4E_mux_t *mux, int track_num, int data_b
         default_sample_duration_present = 0x000008,
         default_sample_flags_present = 0x000020,
     } e;
+    (void)e;
 
     track_t *tr = ((track_t*)mux->tracks.data) + track_num;
 
@@ -1134,7 +1125,7 @@ int MP4E_put_sample(MP4E_mux_t *mux, int track_num, const void *data, int data_b
         if (!mux->sequential_mode_flag)
         {
             sample_t *smpl_desc;
-            if (tr->smpl.bytes < sizeof(sample_t))
+            if ((size_t)tr->smpl.bytes < sizeof(sample_t))
                 return MP4E_STATUS_NO_MEMORY; // write continuation, but there are no samples in the index
             // Accumulate size of the continuation in the sample descriptor
             smpl_desc = (sample_t*)(tr->smpl.data + tr->smpl.bytes) - 1;
@@ -3181,7 +3172,7 @@ broken_android_meta_hack:
         // if box is not envelope, just skip it
         if (i == NELEM(g_envelope_box))
         {
-            if (payload_bytes > file_size)
+            if (payload_bytes > (size_t)file_size)
             {
                 eof_flag = 1;
             } else
