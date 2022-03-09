@@ -105,7 +105,8 @@ int demux(uint8_t *input_buf, ssize_t input_size, FILE *fout, int ntrack)
             for (i = 0; i < mp4.track[ntrack].sample_count; i++)
             {
                 unsigned frame_bytes, timestamp, duration;
-                MP4D_file_offset_t ofs = MP4D_frame_offset(&mp4, ntrack, i, &frame_bytes, &timestamp, &duration);
+                int is_sync;
+                MP4D_file_offset_t ofs = MP4D_frame_offset(&mp4, ntrack, i, &frame_bytes, &timestamp, &duration, &is_sync);
                 uint8_t *mem = input_buf + ofs;
                 sum_duration += duration;
                 while (frame_bytes)
@@ -138,7 +139,8 @@ int demux(uint8_t *input_buf, ssize_t input_size, FILE *fout, int ntrack)
             for (i = 0; i < mp4.track[ntrack].sample_count; i++)
             {
                 unsigned frame_bytes, timestamp, duration;
-                MP4D_file_offset_t ofs = MP4D_frame_offset(&mp4, ntrack, i, &frame_bytes, &timestamp, &duration);
+                int is_sync;
+                MP4D_file_offset_t ofs = MP4D_frame_offset(&mp4, ntrack, i, &frame_bytes, &timestamp, &duration, &is_sync);
                 printf("ofs=%d frame_bytes=%d timestamp=%d duration=%d\n", (unsigned)ofs, frame_bytes, timestamp, duration);
 #if ENABLE_AUDIO
                 UCHAR *frame = (UCHAR *)(input_buf + ofs);
