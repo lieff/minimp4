@@ -1445,7 +1445,9 @@ static int mp4e_flush_index(MP4E_mux_t *mux)
                                     int dsi_size_size = od_size_of_size(dsi_bytes);
                                     int dcd_bytes = dsi_bytes + dsi_size_size + 1 + (1 + 1 + 3 + 4 + 4);
                                     int dcd_size_size = od_size_of_size(dcd_bytes);
-                                    int esd_bytes = dcd_bytes + dcd_size_size + 1 + 3;
+                                    int slc_size_size = od_size_of_size(1);
+                                    int slc_bytes = slc_size_size + 1 + 1;
+                                    int esd_bytes = dcd_bytes + dcd_size_size + 1 + 3 + slc_bytes;
 
 #define WRITE_OD_LEN(size) if (size > 0x7F) do { size -= 0x7F; WRITE_1(0x00ff); } while (size > 0x7F); WRITE_1(size)
                                     WRITE_1(3); // OD_ESD
@@ -1475,6 +1477,10 @@ static int mp4e_flush_index(MP4E_mux_t *mux)
                                     {
                                         WRITE_1(tr->vsps.data[2 + i]);
                                     }
+
+                                    WRITE_1(6); // OD_SLC
+                                    WRITE_OD_LEN(slc_size_size);
+                                    WRITE_1(2);
                                 }
                                 END_ATOM;
                             END_ATOM;
