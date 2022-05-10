@@ -1122,6 +1122,7 @@ int MP4E_put_sample(MP4E_mux_t *mux, int track_num, const void *data, int data_b
         // NOTE: assume a constant `duration` to calculate current timestamp
         uint64_t timestamp = (uint64_t)mux->fragments_count * duration;
         #endif
+        mux->fragments_count++;
         if (!mux->index_flushed) {
             ERR(mp4e_flush_index(mux)); // write file headers before 1st sample
             mux->index_flushed = 1;
