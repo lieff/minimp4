@@ -434,6 +434,18 @@ int MP4E_add_track(MP4E_mux_t *mux, const MP4E_track_t *track_data);
 int MP4E_put_sample(MP4E_mux_t *mux, int track_num, const void *data, int data_bytes, int duration, int kind);
 
 /**
+*   Writes the MP4 index if not already written, and any pending track data
+*
+*   return error code MP4E_STATUS_*
+*/
+int MP4E_flush(MP4E_mux_t *mux);
+
+/**
+*   Set the file position for the next write operation
+*/
+void MP4E_set_write_pos(MP4E_mux_t *mux, int64_t write_pos);
+
+/**
 *   Finalize MP4 file, de-allocated memory, and closes MP4 multiplexer.
 *   The close operation takes a time and disk space, since it writes MP4 file
 *   indexes.  Please note that this function does not closes file handle,
@@ -696,6 +708,7 @@ typedef struct MP4E_mux_tag
     int sequential_mode_flag;
     int enable_fragmentation; // flag, indicating streaming-friendly 'fragmentation' mode
     int fragments_count;      // # of fragments in 'fragmentation' mode
+    int index_flushed;        // flag, indicating if the index has been written
 
 } MP4E_mux_t;
 
@@ -817,6 +830,7 @@ MP4E_mux_t *MP4E_open(int sequential_mode_flag, int enable_fragmentation, void *
     mux->sequential_mode_flag = sequential_mode_flag || enable_fragmentation;
     mux->enable_fragmentation = enable_fragmentation;
     mux->fragments_count = 0;
+    mux->index_flushed = 0;
     mux->write_callback = write_callback;
     mux->token = token;
     mux->text_comment = NULL;
@@ -1108,8 +1122,11 @@ int MP4E_put_sample(MP4E_mux_t *mux, int track_num, const void *data, int data_b
         // NOTE: assume a constant `duration` to calculate current timestamp
         uint64_t timestamp = (uint64_t)mux->fragments_count * duration;
         #endif
-        if (!mux->fragments_count++)
+        mux->fragments_count++;
+        if (!mux->index_flushed) {
             ERR(mp4e_flush_index(mux)); // write file headers before 1st sample
+            mux->index_flushed = 1;
+        }
         // write MOOF + MDAT + sample data
         #if MP4D_TFDT_SUPPORT
         ERR(mp4e_write_fragment_header(mux, track_num, data_bytes, duration, kind, timestamp));
@@ -1737,6 +1754,27 @@ static int mp4e_flush_index(MP4E_mux_t *mux)
     mux->write_pos += p - base;
     free(base);
     return err;
+}
+
+int MP4E_flush(MP4E_mux_t *mux) {
+    unsigned int ntr, ntracks = mux->tracks.bytes / sizeof(track_t);
+
+    if (!mux->index_flushed) {
+        ERR(mp4e_flush_index(mux));
+        mux->index_flushed = 1;
+    }
+
+    for (ntr = 0; ntr < ntracks; ntr++)
+    {
+        track_t *tr = ((track_t*)mux->tracks.data) + ntr;
+        ERR(write_pending_data(mux, tr));
+    }
+
+    return MP4E_STATUS_OK;
+}
+
+void MP4E_set_write_pos(MP4E_mux_t *mux, int64_t write_pos) {
+    mux->write_pos = write_pos;
 }
 
 int MP4E_close(MP4E_mux_t *mux)
