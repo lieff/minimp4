@@ -3,4 +3,3 @@ target: minimp4_x86
 
 cmds:
   - cmd: /minimp4_x86 -d @@ out
-  #/minimp4_x86 -m @@ out2
