@@ -1,0 +1,6 @@
+project: jbgreenh/minimp4
+target: minimp4_x86
+
+cmds:
+  - cmd: /minimp4_x86 -d @@ out
+    cmd: /minimp4_x86 -m @@ out2
