@@ -153,6 +153,7 @@ typedef struct
         {
             // number of channels in the audio track.
             unsigned channelcount;
+            unsigned samplerate_hz;
         } a;
 
         struct
@@ -1446,7 +1447,7 @@ static int mp4e_flush_index(MP4E_mux_t *mux)
                                 WRITE_2(tr->info.u.a.channelcount); // channelcount
                                 WRITE_2(16); // samplesize
                                 WRITE_4(0);  // pre_defined+reserved
-                                WRITE_4((tr->info.time_scale << 16));  // samplerate == = {timescale of media}<<16;
+                                WRITE_4((tr->info.u.a.samplerate_hz << 16));  // samplerate
                             }
 
                                 ATOM_FULL(BOX_esds, 0);
