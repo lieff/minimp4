@@ -274,6 +274,7 @@ int main(int argc, char **argv)
     tr.time_scale = 90000;
     tr.default_duration = 0;
     tr.u.a.channelcount = 1;
+    tr.u.a.samplerate_hz = AUDIO_RATE;
     int audio_track_id = MP4E_add_track(mux, &tr);
     MP4E_set_dsi(mux, audio_track_id, info.confBuf, info.confSize);
 #endif
