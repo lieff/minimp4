@@ -286,6 +286,7 @@ typedef struct
 #if MP4D_TIMESTAMPS_SUPPORTED
     unsigned *timestamp;
     unsigned *duration;
+    unsigned *comp_timestamp;
 #endif
 
 } MP4D_track_t;
@@ -2909,13 +2910,28 @@ broken_android_meta_hack:
         case BOX_ctts:
             {
                 unsigned count = READ(4);
+                unsigned j, k = 0, ts = 0, ts_count = count;
+#if MP4D_TIMESTAMPS_SUPPORTED
+                MALLOC(unsigned int*, tr->comp_timestamp, ts_count*4);
+#endif
+
                 for (i = 0; i < count; i++)
                 {
-                    int sc = READ(4);
+                    unsigned sc = READ(4);
                     int d =  READ(4);
-                    (void)sc;
-                    (void)d;
                     TRACE(("sample %8d count %8d decoding to composition offset %8d\n", i, sc, d));
+#if MP4D_TIMESTAMPS_SUPPORTED
+                    if (k + sc > ts_count)
+                    {
+                        ts_count = k + sc;
+                        tr->comp_timestamp = (unsigned int*)realloc(tr->comp_timestamp, ts_count * sizeof(unsigned));
+                    }
+                    for (j = 0; j < sc; j++)
+                    {
+                        tr->comp_timestamp[k] = tr->timestamp[k] + d;
+                        k++;
+                    }
+#endif
                 }
             }
             break;
@@ -3279,7 +3295,7 @@ static int nearest_sync_sample(MP4D_track_t *tr, unsigned nsample)
 }
 
 // Exported API function
-MP4D_file_offset_t MP4D_frame_offset(const MP4D_demux_t *mp4, unsigned ntrack, unsigned nsample, unsigned *frame_bytes, unsigned *timestamp, unsigned *duration, int *is_sync)
+MP4D_file_offset_t MP4D_frame_offset(const MP4D_demux_t *mp4, unsigned ntrack, unsigned nsample, unsigned *frame_bytes, unsigned *dts, unsigned *pts, unsigned *duration, int *is_sync)
 {
     MP4D_track_t *tr = mp4->track + ntrack;
     unsigned ns;
@@ -3300,12 +3316,20 @@ MP4D_file_offset_t MP4D_frame_offset(const MP4D_demux_t *mp4, unsigned ntrack, u
 
     *frame_bytes = tr->entry_size[ns];
 
-    if (timestamp)
+    if (dts) {
+#if MP4D_TIMESTAMPS_SUPPORTED
+        *dts = tr->timestamp[ns];
+#else
+        *dts = 0;
+#endif
+    }
+
+    if (pts)
     {
 #if MP4D_TIMESTAMPS_SUPPORTED
-        *timestamp = tr->timestamp[ns];
+        *pts = tr->comp_timestamp[ns];
 #else
-        *timestamp = 0;
+        *pts = 0;
 #endif
     }
     if (duration)
@@ -3346,6 +3370,7 @@ void MP4D_close(MP4D_demux_t *mp4)
 #if MP4D_TIMESTAMPS_SUPPORTED
         FREE(tr->timestamp);
         FREE(tr->duration);
+        FREE(tr->comp_timestamp);
 #endif
         FREE(tr->sample_to_chunk);
         FREE(tr->chunk_offset);
