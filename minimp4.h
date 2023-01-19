@@ -3327,7 +3327,7 @@ MP4D_file_offset_t MP4D_frame_offset(const MP4D_demux_t *mp4, unsigned ntrack, u
     if (pts)
     {
 #if MP4D_TIMESTAMPS_SUPPORTED
-        *pts = tr->comp_timestamp[ns];
+        *pts = tr->comp_timestamp ? tr->comp_timestamp[ns] : tr->timestamp[ns];
 #else
         *pts = 0;
 #endif
