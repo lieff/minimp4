@@ -176,6 +176,12 @@ typedef struct
     // The 'sample' is MP4 term, denoting audio or video frame
     unsigned sample_count;
 
+    // Elementary Stream Descriptor (ESDS) data offset
+    unsigned esds_offset;
+
+    // ESDS data size
+    unsigned esds_bytes;
+
     // Decoder-specific info (DSI) data
     unsigned char *dsi;
 
@@ -3065,6 +3071,15 @@ broken_android_meta_hack:
             // for BOX_mp4v:
             //      BOX_esds
             break;
+
+        case BOX_esds:
+            assert(tr);
+            if (!tr->esds_offset && payload_bytes) {
+                // Don't affect the parsing of OD boxes by just storing the offset
+                tr->esds_offset = (unsigned)mp4->read_pos;
+                tr->esds_bytes = (unsigned)payload_bytes;
+                break;
+            }
 
         case BOX_avcC:  // AVCDecoderConfigurationRecord()
             // hack: AAC-specific DSI field reused (for it have same purpoose as sps/pps)
