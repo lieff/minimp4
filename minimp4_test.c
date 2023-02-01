@@ -89,14 +89,14 @@ int demux(uint8_t *input_buf, ssize_t input_size, FILE *fout, int ntrack)
         {   // assume h264
 #define USE_SHORT_SYNC 0
             char sync[4] = { 0, 0, 0, 1 };
-            while (spspps = MP4D_read_sps(&mp4, ntrack, i, &spspps_bytes))
+            while ((spspps = MP4D_read_sps(&mp4, ntrack, i, &spspps_bytes)))
             {
                 fwrite(sync + USE_SHORT_SYNC, 1, 4 - USE_SHORT_SYNC, fout);
                 fwrite(spspps, 1, spspps_bytes, fout);
                 i++;
             }
             i = 0;
-            while (spspps = MP4D_read_pps(&mp4, ntrack, i, &spspps_bytes))
+            while ((spspps = MP4D_read_pps(&mp4, ntrack, i, &spspps_bytes)))
             {
                 fwrite(sync + USE_SHORT_SYNC, 1, 4 - USE_SHORT_SYNC, fout);
                 fwrite(spspps, 1, spspps_bytes, fout);
@@ -106,7 +106,7 @@ int demux(uint8_t *input_buf, ssize_t input_size, FILE *fout, int ntrack)
             {
                 unsigned frame_bytes, timestamp, duration;
                 int is_sync;
-                MP4D_file_offset_t ofs = MP4D_frame_offset(&mp4, ntrack, i, &frame_bytes, &timestamp, &duration, &is_sync);
+                MP4D_file_offset_t ofs = MP4D_frame_offset(&mp4, ntrack, i, &frame_bytes, &timestamp, NULL, &duration, &is_sync);
                 uint8_t *mem = input_buf + ofs;
                 sum_duration += duration;
                 while (frame_bytes)
@@ -140,7 +140,7 @@ int demux(uint8_t *input_buf, ssize_t input_size, FILE *fout, int ntrack)
             {
                 unsigned frame_bytes, timestamp, duration;
                 int is_sync;
-                MP4D_file_offset_t ofs = MP4D_frame_offset(&mp4, ntrack, i, &frame_bytes, &timestamp, &duration, &is_sync);
+                MP4D_file_offset_t ofs = MP4D_frame_offset(&mp4, ntrack, i, &frame_bytes, &timestamp, NULL, &duration, &is_sync);
                 printf("ofs=%d frame_bytes=%d timestamp=%d duration=%d\n", (unsigned)ofs, frame_bytes, timestamp, duration);
 #if ENABLE_AUDIO
                 UCHAR *frame = (UCHAR *)(input_buf + ofs);
