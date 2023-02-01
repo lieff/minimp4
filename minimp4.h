@@ -386,13 +386,14 @@ int MP4D_open(MP4D_demux_t *mp4, int (*read_callback)(int64_t offset, void *buff
 *   MP4 term for 'frame'
 *
 *   frame_bytes [OUT]   - return coded frame size in bytes
-*   timestamp [OUT]     - return frame timestamp (in mp4->timescale units)
+*   dts [OUT]           - return frame decoding timestamp (in mp4->timescale units)
+*   pts [OUT]           - return frame presentation timestamp (in mp4->timescale units)
 *   duration [OUT]      - return frame duration (in mp4->timescale units)
 *   is_sync [OUT]       - return if frame is a sync frame
 *
 *   function return offset for the frame
 */
-MP4D_file_offset_t MP4D_frame_offset(const MP4D_demux_t *mp4, unsigned int ntrack, unsigned int nsample, unsigned int *frame_bytes, unsigned *timestamp, unsigned *duration, int *is_sync);
+MP4D_file_offset_t MP4D_frame_offset(const MP4D_demux_t *mp4, unsigned ntrack, unsigned nsample, unsigned *frame_bytes, unsigned *dts, unsigned *pts, unsigned *duration, int *is_sync);
 
 /**
 *   Find the nearest sync frame.
