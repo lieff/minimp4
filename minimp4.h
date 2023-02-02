@@ -2989,8 +2989,13 @@ broken_android_meta_hack:
             break;
 
         case BOX_hdlr:
-            if (tr) // When this box is within 'meta' box, the track may not be avaialable
+            if (tr) // When this box is within 'meta' box, the track may not be available
             {
+                // Without this check the trak/mdia/minf/hdlr could overwrite our trak/mdia/hdlr.
+                if (tr->handler_type == MP4D_HANDLER_TYPE_VIDE || tr->handler_type == MP4D_HANDLER_TYPE_SOUN)
+                {
+                    break; // Skip
+                }
                 SKIP(4); // pre_defined
                 tr->handler_type = READ(4);
             }
