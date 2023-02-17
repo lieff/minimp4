@@ -2625,7 +2625,7 @@ int MP4D_open(MP4D_demux_t *mp4, int (*read_callback)(int64_t offset, void *buff
 #endif
 #if MP4D_TRACE_TIMESTAMPS
             {BOX_stts, 0, 0},
-            {BOX_ctts, 0, 0},
+            {BOX_ctts, 1, 0},
 #endif
             {BOX_stz2, 0, 1},
             {BOX_stsz, 0, 1},
