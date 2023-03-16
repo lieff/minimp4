@@ -233,6 +233,9 @@ typedef struct
     // Track language: 3-char ISO 639-2T code: "und", "eng", "rus", "jpn" etc...
     unsigned char language[4];
 
+    // Transformation matrix
+    float matrix[9];
+
     // MP4 stream type
     // case 0x00: return "Forbidden";
     // case 0x01: return "ObjectDescriptorStream";
@@ -2581,6 +2584,10 @@ static unsigned int read_buf(unsigned char **p, int nb)
     return v;
 }
 
+static float fixedToFloat(int fixed, unsigned precision) {
+    return (double)fixed / (double)(1 << precision);
+}
+
 /*
 *   On error: release resources.
 */
@@ -3021,6 +3028,43 @@ broken_android_meta_hack:
             }
             // the rest of this box is skipped by default ...
             break;
+        
+        case BOX_tkhd:
+            {
+                assert(tr);
+                /*
+                UInt8 Version;
+                UInt8[] Flags; //3 bytes
+                UInt32 CreationTime;
+                UInt32 ModificatonTime;
+                UInt32 TrackId;
+                UInt32 Reserved1;
+                UInt32 Duration;
+                UInt64 Reserved2;
+                UInt16 Layer;
+                UInt16 AlternateGroup;
+                Fixed8.8 Volume;
+                UInt16 Reserved3;
+                Matrix Matrix;
+                Fixed16.16 Width;
+                Fixed16.16 Heigth;
+                */
+                SKIP(1+3+4+4+4+4+4+8+2+2+2+2);
+
+                tr->matrix[0] = fixedToFloat(READ(4), 16);
+                tr->matrix[1] = fixedToFloat(READ(4), 16);
+                tr->matrix[2] = fixedToFloat(READ(4), 30);
+                tr->matrix[3] = fixedToFloat(READ(4), 16);
+                tr->matrix[4] = fixedToFloat(READ(4), 16);
+                tr->matrix[5] = fixedToFloat(READ(4), 30);
+                tr->matrix[6] = fixedToFloat(READ(4), 16);
+                tr->matrix[7] = fixedToFloat(READ(4), 16);
+                tr->matrix[8] = fixedToFloat(READ(4), 30);
+
+                SKIP(4 + 4);
+
+                break;
+            }
 
         case BOX_hdlr:
             if (tr) // When this box is within 'meta' box, the track may not be available
