@@ -272,6 +272,26 @@ typedef struct
             unsigned char AVCLevelIndication;
             unsigned char lengthSizeMinusOne;
         } avc1;
+
+        struct {
+            unsigned char configuration_version;
+            unsigned char general_profile_space;
+            unsigned char general_tier_flag;
+            unsigned char general_profile_idc;
+            unsigned int general_profile_compatibility_flags;
+            unsigned char general_constraint_indicator_flags[6];
+            unsigned char general_level_idc;
+            unsigned short min_spatial_segmentation_idc;
+            unsigned short parallelismType;
+            unsigned short chroma_format_idc;
+            unsigned short bit_depth_luma_minus8;
+            unsigned short bit_depth_chroma_minus8;
+            unsigned short avg_frame_rate;
+            unsigned short constant_frame_rate;
+            unsigned short num_temporal_layers;
+            unsigned short temporal_id_nested;
+            unsigned short length_size_minus1;
+        } hvc1;
     } CodecDescription;
 #endif
 
@@ -2547,6 +2567,20 @@ static void my_fseek(MP4D_demux_t *mp4, boxsize_t pos, int *eof_flag)
 #define SKIP(n) { boxsize_t t = MINIMP4_MIN(payload_bytes, n); my_fseek(mp4, t, &eof_flag); payload_bytes -= t; }
 #define MALLOC(t, p, size) p = (t)malloc(size); if (!(p)) { ERROR("out of memory"); }
 
+static unsigned int read_buf(unsigned char **p, int nb)
+{
+    uint32_t v = 0;
+    switch (nb)
+    {
+    case 4: v = (v << 8) | *((*p)++);
+    case 3: v = (v << 8) | *((*p)++);
+    case 2: v = (v << 8) | *((*p)++);
+    default:
+    case 1: v = (v << 8) | *((*p)++);
+    }
+    return v;
+}
+
 /*
 *   On error: release resources.
 */
@@ -3051,6 +3085,7 @@ broken_android_meta_hack:
             break;
 
 #if MP4D_AVC_SUPPORTED
+        case BOX_hvc1:
         case BOX_avc1:  // AVCSampleEntry extends VisualSampleEntry
 //         case BOX_avc2:   - no test
 //         case BOX_svc1:   - no test
@@ -3088,7 +3123,7 @@ broken_android_meta_hack:
             }
 
         case BOX_avcC:  // AVCDecoderConfigurationRecord()
-            // hack: AAC-specific DSI field reused (for it have same purpoose as sps/pps)
+            // hack: AAC-specific DSI field reused (for it have same purpose as sps/pps)
             // TODO: check this hack if BOX_esds co-exist with BOX_avcC
             tr->object_type_indication = MP4_OBJECT_TYPE_AVC;
             tr->dsi = (unsigned char*)malloc((size_t)box_bytes);
@@ -3131,6 +3166,69 @@ broken_android_meta_hack:
             }
             break;
 #endif  // MP4D_AVC_SUPPORTED
+
+#if MP4D_HEVC_SUPPORTED
+        case BOX_hvcC:  // HEVCDecoderConfigurationRecord()
+            {
+                // hack: AAC-specific DSI field reused (for it have same purpose as sps/pps)
+                // TODO: check this hack if BOX_esds co-exist with BOX_hvcC
+                tr->object_type_indication = MP4_OBJECT_TYPE_HEVC;
+                tr->dsi = (unsigned char*)malloc((size_t)payload_bytes);
+                tr->dsi_bytes = (unsigned)payload_bytes;
+                for (i = 0; payload_bytes > 0; i++)
+                {
+                    tr->dsi[i] = READ(1);
+                }
+
+                // Parse codec description
+                unsigned char *p = tr->dsi;
+                tr->CodecDescription.hvc1.configuration_version = read_buf(&p, 1);
+                unsigned char profile_info = read_buf(&p, 1);
+                tr->CodecDescription.hvc1.general_profile_space = profile_info >> 6;
+                tr->CodecDescription.hvc1.general_tier_flag = profile_info >> 5 & 1;
+                tr->CodecDescription.hvc1.general_profile_idc = profile_info & 31;
+                tr->CodecDescription.hvc1.general_profile_compatibility_flags = read_buf(&p, 4);
+                for (i = 0; i < 6; i++) {
+                    tr->CodecDescription.hvc1.general_constraint_indicator_flags[i] = read_buf(&p, 1);
+                }
+                tr->CodecDescription.hvc1.general_level_idc = read_buf(&p, 1);
+                tr->CodecDescription.hvc1.min_spatial_segmentation_idc = read_buf(&p, 2) & 4095;
+                tr->CodecDescription.hvc1.parallelismType = read_buf(&p, 1) & 3;
+                tr->CodecDescription.hvc1.chroma_format_idc = read_buf(&p, 1) & 3;
+                tr->CodecDescription.hvc1.bit_depth_luma_minus8 = read_buf(&p, 1) & 7;
+                tr->CodecDescription.hvc1.bit_depth_chroma_minus8 = read_buf(&p, 1) & 7;
+                tr->CodecDescription.hvc1.avg_frame_rate = read_buf(&p, 2);
+                unsigned char fr = read_buf(&p, 1);
+                tr->CodecDescription.hvc1.constant_frame_rate = fr >> 6;
+                tr->CodecDescription.hvc1.num_temporal_layers = fr >> 3 & 7;
+                tr->CodecDescription.hvc1.temporal_id_nested = fr >> 2 & 1;
+                tr->CodecDescription.hvc1.length_size_minus1 = fr & 3;
+
+#if 0
+                unsigned int numOfArrays = READ(1);
+                *p++ = numOfArrays;
+                for (i = 0; i < numOfArrays; i++)
+                {
+                    unsigned char naluType = READ(1);
+                    *p++ = naluType; // & 0x63
+                    unsigned j, naluLength = READ(2);
+                    *p++ = naluLength >> 8;
+                    *p++ = naluLength ;
+                    for (j = 0; j < naluLength; j++)
+                    {
+                        unsigned k, nul = READ(2);
+                        *p++ = nul >> 8;
+                        *p++ = nul ;
+                        for (k = 0; k < nul; k++)
+                        {
+                            *p++ = READ(1);
+                        }
+                    }
+                }
+#endif
+            }
+            break;
+#endif
 
         case OD_ESD:
             {
