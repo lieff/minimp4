@@ -652,7 +652,7 @@ enum
     BOX_meta   = FOUR_CHAR_INT( 'm', 'e', 't', 'a' ),
     BOX_ilst   = FOUR_CHAR_INT( 'i', 'l', 's', 't' ),
 
-    // Metagata tags, see http://atomicparsley.sourceforge.net/mpeg-4files.html
+    // Metadata tags, see http://atomicparsley.sourceforge.net/mpeg-4files.html
     BOX_calb    = FOUR_CHAR_INT( '\xa9', 'a', 'l', 'b'),    // album
     BOX_cart    = FOUR_CHAR_INT( '\xa9', 'a', 'r', 't'),    // artist
     BOX_aART    = FOUR_CHAR_INT( 'a', 'A', 'R', 'T' ),      // album artist
@@ -3410,8 +3410,13 @@ broken_android_meta_hack:
 
         // remove empty boxes from stack
         // don't touch box with index 0 (which indicates whole file)
-        while (depth > 0 && !stack[depth].bytes)
+        while (depth > 0 && stack[depth].bytes < 8)
         {
+            boxsize_t padding = stack[depth].bytes;
+            if (padding)
+            {
+                mp4->read_pos += padding;
+            }
             depth--;
         }
 
