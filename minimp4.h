@@ -584,6 +584,7 @@ enum
     BOX_vmhd    = FOUR_CHAR_INT( 'v', 'm', 'h', 'd' ),//VideoMediaHeaderAtomType
     BOX_url     = FOUR_CHAR_INT( 'u', 'r', 'l', ' ' ),
     BOX_urn     = FOUR_CHAR_INT( 'u', 'r', 'n', ' ' ),
+    BOX_colr    = FOUR_CHAR_INT( 'c', 'o', 'l', 'r' ),
 
     BOX_gnrv    = FOUR_CHAR_INT( 'g', 'n', 'r', 'v' ),//GenericVisualSampleEntryAtomType
     BOX_gnra    = FOUR_CHAR_INT( 'g', 'n', 'r', 'a' ),//GenericAudioSampleEntryAtomType
@@ -3273,6 +3274,19 @@ broken_android_meta_hack:
             }
             break;
 #endif
+
+        case BOX_colr:
+            {
+                unsigned color_type = READ(4);
+                if (color_type == FOUR_CHAR_INT('n', 'c', 'l', 'x')) {
+                    unsigned color_primaries = READ(2);
+                    unsigned transfer_characteristics = READ(2);
+                    unsigned matrix_coefficients = READ(2);
+                    unsigned full_range_flag = READ(1) >> 7;
+                }
+                SKIP(payload_bytes);
+                break;
+            }
 
         case OD_ESD:
             {
