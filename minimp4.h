@@ -233,8 +233,10 @@ typedef struct
     // Track language: 3-char ISO 639-2T code: "und", "eng", "rus", "jpn" etc...
     unsigned char language[4];
 
-    // Transformation matrix
+    // Transformation matrix and target width and height
     float matrix[9];
+    float width;
+    float height;
 
     // MP4 stream type
     // case 0x00: return "Forbidden";
@@ -3062,7 +3064,8 @@ broken_android_meta_hack:
                 tr->matrix[7] = fixedToFloat(READ(4), 16);
                 tr->matrix[8] = fixedToFloat(READ(4), 30);
 
-                SKIP(4 + 4);
+                tr->width = fixedToFloat(READ(4), 16);
+                tr->height = fixedToFloat(READ(4), 16);
 
                 break;
             }
