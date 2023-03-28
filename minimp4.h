@@ -3413,7 +3413,7 @@ broken_android_meta_hack:
 
         // remove empty boxes from stack
         // don't touch box with index 0 (which indicates whole file)
-        while (depth > 0 && stack[depth].bytes < 8)
+        while (depth > 0 && (stack[depth].bytes == 0 || (stack[depth].format == BOX_ATOM && stack[depth].bytes < 8)))
         {
             boxsize_t padding = stack[depth].bytes;
             if (padding)
