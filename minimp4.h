@@ -1822,17 +1822,14 @@ typedef struct
     int cache_free_bits;
 
     // Current read position
-    const uint16_t *buf;
+    const uint8_t *buf;
 
     // original data buffer
-    const uint16_t *origin;
+    const uint8_t *origin;
 
     // original data buffer length, bytes
     unsigned origin_bytes;
 } bit_reader_t;
-
-
-#define LOAD_SHORT(x) ((uint16_t)(x << 8) | (x >> 8))
 
 static unsigned int show_bits(bit_reader_t *bs, int n)
 {
@@ -1849,8 +1846,10 @@ static void flush_bits(bit_reader_t *bs, int n)
     bs->cache_free_bits += n;
     if (bs->cache_free_bits >= 0)
     {
-        bs->cache |= ((uint32_t)LOAD_SHORT(*bs->buf)) << bs->cache_free_bits;
-        bs->buf++;
+        uint32_t val = *(bs->buf++);
+        val <<= 8;
+        val |= *(bs->buf++);
+        bs->cache |= val << bs->cache_free_bits;
         bs->cache_free_bits -= 16;
     }
 }
@@ -1866,7 +1865,7 @@ static void set_pos_bits(bit_reader_t *bs, unsigned pos_bits)
 {
     assert((int)pos_bits >= 0);
 
-    bs->buf = bs->origin + pos_bits/16;
+    bs->buf = bs->origin + pos_bits/8;
     bs->cache = 0;
     bs->cache_free_bits = 16;
     flush_bits(bs, 0);
@@ -1878,7 +1877,7 @@ static unsigned get_pos_bits(const bit_reader_t *bs)
     // Current bitbuffer position =
     // position of next wobits in the internal buffer
     // minus bs, available in bit cache wobits
-    unsigned pos_bits = (unsigned)(bs->buf - bs->origin)*16;
+    unsigned pos_bits = (unsigned)(bs->buf - bs->origin)*8;
     pos_bits -= 16 - bs->cache_free_bits;
     assert((int)pos_bits >= 0);
     return pos_bits;
@@ -1891,7 +1890,7 @@ static int remaining_bits(const bit_reader_t *bs)
 
 static void init_bits(bit_reader_t *bs, const void *data, unsigned data_bytes)
 {
-    bs->origin = (const uint16_t *)data;
+    bs->origin = (const uint8_t *)data;
     bs->origin_bytes = data_bytes;
     set_pos_bits(bs, 0);
 }
