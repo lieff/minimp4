@@ -153,6 +153,7 @@ typedef struct
         {
             // number of channels in the audio track.
             unsigned channelcount;
+            unsigned samplerate_hz;
         } a;
 
         struct
@@ -174,6 +175,12 @@ typedef struct
     // How many 'samples' in the track
     // The 'sample' is MP4 term, denoting audio or video frame
     unsigned sample_count;
+
+    // Elementary Stream Descriptor (ESDS) data offset
+    unsigned esds_offset;
+
+    // ESDS data size
+    unsigned esds_bytes;
 
     // Decoder-specific info (DSI) data
     unsigned char *dsi;
@@ -226,6 +233,11 @@ typedef struct
     // Track language: 3-char ISO 639-2T code: "und", "eng", "rus", "jpn" etc...
     unsigned char language[4];
 
+    // Transformation matrix and target width and height
+    float matrix[9];
+    float width;
+    float height;
+
     // MP4 stream type
     // case 0x00: return "Forbidden";
     // case 0x01: return "ObjectDescriptorStream";
@@ -255,6 +267,37 @@ typedef struct
             unsigned height;
         } video;
     } SampleDescription;
+
+    union
+    {
+        struct {
+            unsigned char configurationVersion;
+            unsigned char AVCProfileIndication;
+            unsigned char profile_compatibility;
+            unsigned char AVCLevelIndication;
+            unsigned char lengthSizeMinusOne;
+        } avc1;
+
+        struct {
+            unsigned char configuration_version;
+            unsigned char general_profile_space;
+            unsigned char general_tier_flag;
+            unsigned char general_profile_idc;
+            unsigned int general_profile_compatibility_flags;
+            unsigned char general_constraint_indicator_flags[6];
+            unsigned char general_level_idc;
+            unsigned short min_spatial_segmentation_idc;
+            unsigned short parallelismType;
+            unsigned short chroma_format_idc;
+            unsigned short bit_depth_luma_minus8;
+            unsigned short bit_depth_chroma_minus8;
+            unsigned short avg_frame_rate;
+            unsigned short constant_frame_rate;
+            unsigned short num_temporal_layers;
+            unsigned short temporal_id_nested;
+            unsigned short length_size_minus1;
+        } hvc1;
+    } CodecDescription;
 #endif
 
     /************************************************************************/
@@ -268,9 +311,13 @@ typedef struct
     unsigned chunk_count;
     MP4D_file_offset_t *chunk_offset;
 
+    unsigned *syncsamples;
+    unsigned syncsamples_count;
+
 #if MP4D_TIMESTAMPS_SUPPORTED
     unsigned *timestamp;
     unsigned *duration;
+    unsigned *comp_timestamp;
 #endif
 
 } MP4D_track_t;
@@ -364,12 +411,19 @@ int MP4D_open(MP4D_demux_t *mp4, int (*read_callback)(int64_t offset, void *buff
 *   MP4 term for 'frame'
 *
 *   frame_bytes [OUT]   - return coded frame size in bytes
-*   timestamp [OUT]     - return frame timestamp (in mp4->timescale units)
+*   dts [OUT]           - return frame decoding timestamp (in mp4->timescale units)
+*   pts [OUT]           - return frame presentation timestamp (in mp4->timescale units)
 *   duration [OUT]      - return frame duration (in mp4->timescale units)
+*   is_sync [OUT]       - return if frame is a sync frame
 *
 *   function return offset for the frame
 */
-MP4D_file_offset_t MP4D_frame_offset(const MP4D_demux_t *mp4, unsigned int ntrack, unsigned int nsample, unsigned int *frame_bytes, unsigned *timestamp, unsigned *duration);
+MP4D_file_offset_t MP4D_frame_offset(const MP4D_demux_t *mp4, unsigned ntrack, unsigned nsample, unsigned *frame_bytes, unsigned *dts, unsigned *pts, unsigned *duration, int *is_sync);
+
+/**
+*   Find the nearest sync frame.
+*/
+unsigned MP4D_nearest_sync_frame(const MP4D_demux_t *mp4, unsigned ntrack, unsigned nsample);
 
 /**
 *   De-allocated memory
@@ -532,6 +586,7 @@ enum
     BOX_vmhd    = FOUR_CHAR_INT( 'v', 'm', 'h', 'd' ),//VideoMediaHeaderAtomType
     BOX_url     = FOUR_CHAR_INT( 'u', 'r', 'l', ' ' ),
     BOX_urn     = FOUR_CHAR_INT( 'u', 'r', 'n', ' ' ),
+    BOX_colr    = FOUR_CHAR_INT( 'c', 'o', 'l', 'r' ),
 
     BOX_gnrv    = FOUR_CHAR_INT( 'g', 'n', 'r', 'v' ),//GenericVisualSampleEntryAtomType
     BOX_gnra    = FOUR_CHAR_INT( 'g', 'n', 'r', 'a' ),//GenericAudioSampleEntryAtomType
@@ -599,7 +654,7 @@ enum
     BOX_meta   = FOUR_CHAR_INT( 'm', 'e', 't', 'a' ),
     BOX_ilst   = FOUR_CHAR_INT( 'i', 'l', 's', 't' ),
 
-    // Metagata tags, see http://atomicparsley.sourceforge.net/mpeg-4files.html
+    // Metadata tags, see http://atomicparsley.sourceforge.net/mpeg-4files.html
     BOX_calb    = FOUR_CHAR_INT( '\xa9', 'a', 'l', 'b'),    // album
     BOX_cart    = FOUR_CHAR_INT( '\xa9', 'a', 'r', 't'),    // artist
     BOX_aART    = FOUR_CHAR_INT( 'a', 'A', 'R', 'T' ),      // album artist
@@ -859,16 +914,6 @@ int MP4E_add_track(MP4E_mux_t *mux, const MP4E_track_t *track_data)
     return ntr;
 }
 
-static const unsigned char *next_dsi(const unsigned char *p, const unsigned char *end, int *bytes)
-{
-    if (p < end + 2)
-    {
-        *bytes = p[0]*256 + p[1];
-        return p + 2;
-    } else
-        return NULL;
-}
-
 static int append_mem(minimp4_vector_t *v, const void *mem, int bytes)
 {
     int i;
@@ -944,7 +989,7 @@ static unsigned get_duration(const track_t *tr)
 static int write_pending_data(MP4E_mux_t *mux, track_t *tr)
 {
     // if have pending sample && have at least one sample in the index
-    if (tr->pending_sample.bytes > 0 && tr->smpl.bytes >= sizeof(sample_t))
+    if (tr->pending_sample.bytes > 0 && (size_t)tr->smpl.bytes >= sizeof(sample_t))
     {
         // Complete pending sample
         sample_t *smpl_desc;
@@ -1005,6 +1050,7 @@ static int mp4e_write_fragment_header(MP4E_mux_t *mux, int track_num, int data_b
         default_sample_duration_present = 0x000008,
         default_sample_flags_present = 0x000020,
     } e;
+    (void)e;
 
     track_t *tr = ((track_t*)mux->tracks.data) + track_num;
 
@@ -1134,7 +1180,7 @@ int MP4E_put_sample(MP4E_mux_t *mux, int track_num, const void *data, int data_b
         if (!mux->sequential_mode_flag)
         {
             sample_t *smpl_desc;
-            if (tr->smpl.bytes < sizeof(sample_t))
+            if ((size_t)tr->smpl.bytes < sizeof(sample_t))
                 return MP4E_STATUS_NO_MEMORY; // write continuation, but there are no samples in the index
             // Accumulate size of the continuation in the sample descriptor
             smpl_desc = (sample_t*)(tr->smpl.data + tr->smpl.bytes) - 1;
@@ -1435,7 +1481,7 @@ static int mp4e_flush_index(MP4E_mux_t *mux)
                                 WRITE_2(tr->info.u.a.channelcount); // channelcount
                                 WRITE_2(16); // samplesize
                                 WRITE_4(0);  // pre_defined+reserved
-                                WRITE_4((tr->info.time_scale << 16));  // samplerate == = {timescale of media}<<16;
+                                WRITE_4((tr->info.u.a.samplerate_hz << 16));  // samplerate
                             }
 
                                 ATOM_FULL(BOX_esds, 0);
@@ -1776,17 +1822,14 @@ typedef struct
     int cache_free_bits;
 
     // Current read position
-    const uint16_t *buf;
+    const uint8_t *buf;
 
     // original data buffer
-    const uint16_t *origin;
+    const uint8_t *origin;
 
     // original data buffer length, bytes
     unsigned origin_bytes;
 } bit_reader_t;
-
-
-#define LOAD_SHORT(x) ((uint16_t)(x << 8) | (x >> 8))
 
 static unsigned int show_bits(bit_reader_t *bs, int n)
 {
@@ -1803,8 +1846,10 @@ static void flush_bits(bit_reader_t *bs, int n)
     bs->cache_free_bits += n;
     if (bs->cache_free_bits >= 0)
     {
-        bs->cache |= ((uint32_t)LOAD_SHORT(*bs->buf)) << bs->cache_free_bits;
-        bs->buf++;
+        uint32_t val = *(bs->buf++);
+        val <<= 8;
+        val |= *(bs->buf++);
+        bs->cache |= val << bs->cache_free_bits;
         bs->cache_free_bits -= 16;
     }
 }
@@ -1820,7 +1865,7 @@ static void set_pos_bits(bit_reader_t *bs, unsigned pos_bits)
 {
     assert((int)pos_bits >= 0);
 
-    bs->buf = bs->origin + pos_bits/16;
+    bs->buf = bs->origin + pos_bits/8;
     bs->cache = 0;
     bs->cache_free_bits = 16;
     flush_bits(bs, 0);
@@ -1832,7 +1877,7 @@ static unsigned get_pos_bits(const bit_reader_t *bs)
     // Current bitbuffer position =
     // position of next wobits in the internal buffer
     // minus bs, available in bit cache wobits
-    unsigned pos_bits = (unsigned)(bs->buf - bs->origin)*16;
+    unsigned pos_bits = (unsigned)(bs->buf - bs->origin)*8;
     pos_bits -= 16 - bs->cache_free_bits;
     assert((int)pos_bits >= 0);
     return pos_bits;
@@ -1845,7 +1890,7 @@ static int remaining_bits(const bit_reader_t *bs)
 
 static void init_bits(bit_reader_t *bs, const void *data, unsigned data_bytes)
 {
-    bs->origin = (const uint16_t *)data;
+    bs->origin = (const uint8_t *)data;
     bs->origin_bytes = data_bytes;
     set_pos_bits(bs, 0);
 }
@@ -2527,6 +2572,24 @@ static void my_fseek(MP4D_demux_t *mp4, boxsize_t pos, int *eof_flag)
 #define SKIP(n) { boxsize_t t = MINIMP4_MIN(payload_bytes, n); my_fseek(mp4, t, &eof_flag); payload_bytes -= t; }
 #define MALLOC(t, p, size) p = (t)malloc(size); if (!(p)) { ERROR("out of memory"); }
 
+static unsigned int read_buf(unsigned char **p, int nb)
+{
+    uint32_t v = 0;
+    switch (nb)
+    {
+    case 4: v = (v << 8) | *((*p)++);
+    case 3: v = (v << 8) | *((*p)++);
+    case 2: v = (v << 8) | *((*p)++);
+    default:
+    case 1: v = (v << 8) | *((*p)++);
+    }
+    return v;
+}
+
+static float fixedToFloat(int fixed, unsigned precision) {
+    return (double)fixed / (double)(1 << precision);
+}
+
 /*
 *   On error: release resources.
 */
@@ -2605,7 +2668,7 @@ int MP4D_open(MP4D_demux_t *mp4, int (*read_callback)(int64_t offset, void *buff
 #endif
 #if MP4D_TRACE_TIMESTAMPS
             {BOX_stts, 0, 0},
-            {BOX_ctts, 0, 0},
+            {BOX_ctts, 1, 0},
 #endif
             {BOX_stz2, 0, 1},
             {BOX_stsz, 0, 1},
@@ -2849,6 +2912,19 @@ broken_android_meta_hack:
                 SKIP(4);    // sample_description_index
             }
             break;
+        case BOX_stss:
+            {
+                unsigned version_flags = READ(4); // currently 0
+                (void)version_flags;
+                unsigned count = READ(4);
+                tr->syncsamples_count = count;
+                MALLOC(unsigned int*, tr->syncsamples, count * sizeof(unsigned int));
+                for (i = 0; i < count; i++) {
+                    unsigned sample = READ(4) - 1; // 1-based
+                    tr->syncsamples[i] = sample;
+                }
+            }
+            break;
 #if MP4D_TRACE_TIMESTAMPS || MP4D_TIMESTAMPS_SUPPORTED
         case BOX_stts:
             {
@@ -2884,13 +2960,28 @@ broken_android_meta_hack:
         case BOX_ctts:
             {
                 unsigned count = READ(4);
+                unsigned j, k = 0, ts = 0, ts_count = count;
+#if MP4D_TIMESTAMPS_SUPPORTED
+                MALLOC(unsigned int*, tr->comp_timestamp, ts_count*4);
+#endif
+
                 for (i = 0; i < count; i++)
                 {
-                    int sc = READ(4);
+                    unsigned sc = READ(4);
                     int d =  READ(4);
-                    (void)sc;
-                    (void)d;
                     TRACE(("sample %8d count %8d decoding to composition offset %8d\n", i, sc, d));
+#if MP4D_TIMESTAMPS_SUPPORTED
+                    if (k + sc > ts_count)
+                    {
+                        ts_count = k + sc;
+                        tr->comp_timestamp = (unsigned int*)realloc(tr->comp_timestamp, ts_count * sizeof(unsigned));
+                    }
+                    for (j = 0; j < sc; j++)
+                    {
+                        tr->comp_timestamp[k] = tr->timestamp[k] + d;
+                        k++;
+                    }
+#endif
                 }
             }
             break;
@@ -2939,10 +3030,53 @@ broken_android_meta_hack:
             }
             // the rest of this box is skipped by default ...
             break;
+        
+        case BOX_tkhd:
+            {
+                assert(tr);
+                /*
+                UInt8 Version;
+                UInt8[] Flags; //3 bytes
+                UInt32 CreationTime;
+                UInt32 ModificatonTime;
+                UInt32 TrackId;
+                UInt32 Reserved1;
+                UInt32 Duration;
+                UInt64 Reserved2;
+                UInt16 Layer;
+                UInt16 AlternateGroup;
+                Fixed8.8 Volume;
+                UInt16 Reserved3;
+                Matrix Matrix;
+                Fixed16.16 Width;
+                Fixed16.16 Heigth;
+                */
+                SKIP(1+3+4+4+4+4+4+8+2+2+2+2);
+
+                tr->matrix[0] = fixedToFloat(READ(4), 16);
+                tr->matrix[1] = fixedToFloat(READ(4), 16);
+                tr->matrix[2] = fixedToFloat(READ(4), 30);
+                tr->matrix[3] = fixedToFloat(READ(4), 16);
+                tr->matrix[4] = fixedToFloat(READ(4), 16);
+                tr->matrix[5] = fixedToFloat(READ(4), 30);
+                tr->matrix[6] = fixedToFloat(READ(4), 16);
+                tr->matrix[7] = fixedToFloat(READ(4), 16);
+                tr->matrix[8] = fixedToFloat(READ(4), 30);
+
+                tr->width = fixedToFloat(READ(4), 16);
+                tr->height = fixedToFloat(READ(4), 16);
+
+                break;
+            }
 
         case BOX_hdlr:
-            if (tr) // When this box is within 'meta' box, the track may not be avaialable
+            if (tr) // When this box is within 'meta' box, the track may not be available
             {
+                // Without this check the trak/mdia/minf/hdlr could overwrite our trak/mdia/hdlr.
+                if (tr->handler_type == MP4D_HANDLER_TYPE_VIDE || tr->handler_type == MP4D_HANDLER_TYPE_SOUN)
+                {
+                    break; // Skip
+                }
                 SKIP(4); // pre_defined
                 tr->handler_type = READ(4);
             }
@@ -2998,6 +3132,7 @@ broken_android_meta_hack:
             break;
 
 #if MP4D_AVC_SUPPORTED
+        case BOX_hvc1:
         case BOX_avc1:  // AVCSampleEntry extends VisualSampleEntry
 //         case BOX_avc2:   - no test
 //         case BOX_svc1:   - no test
@@ -3025,8 +3160,17 @@ broken_android_meta_hack:
             //      BOX_esds
             break;
 
+        case BOX_esds:
+            assert(tr);
+            if (!tr->esds_offset && payload_bytes) {
+                // Don't affect the parsing of OD boxes by just storing the offset
+                tr->esds_offset = (unsigned)mp4->read_pos;
+                tr->esds_bytes = (unsigned)payload_bytes;
+                break;
+            }
+
         case BOX_avcC:  // AVCDecoderConfigurationRecord()
-            // hack: AAC-specific DSI field reused (for it have same purpoose as sps/pps)
+            // hack: AAC-specific DSI field reused (for it have same purpose as sps/pps)
             // TODO: check this hack if BOX_esds co-exist with BOX_avcC
             tr->object_type_indication = MP4_OBJECT_TYPE_AVC;
             tr->dsi = (unsigned char*)malloc((size_t)box_bytes);
@@ -3041,15 +3185,15 @@ broken_android_meta_hack:
                 //bit(6) reserved =
                 unsigned int lengthSizeMinusOne = READ(1) & 3;
 
-                (void)configurationVersion;
-                (void)AVCProfileIndication;
-                (void)profile_compatibility;
-                (void)AVCLevelIndication;
-                (void)lengthSizeMinusOne;
+                tr->CodecDescription.avc1.configurationVersion = configurationVersion;
+                tr->CodecDescription.avc1.AVCProfileIndication = AVCProfileIndication;
+                tr->CodecDescription.avc1.profile_compatibility = profile_compatibility;
+                tr->CodecDescription.avc1.AVCLevelIndication = AVCLevelIndication;
+                tr->CodecDescription.avc1.lengthSizeMinusOne = lengthSizeMinusOne;
 
                 for (spspps = 0; spspps < 2; spspps++)
                 {
-                    unsigned int numOfSequenceParameterSets= READ(1);
+                    unsigned int numOfSequenceParameterSets = READ(1);
                     if (!spspps)
                     {
                          numOfSequenceParameterSets &= 31;  // clears 3 msb for SPS
@@ -3069,6 +3213,82 @@ broken_android_meta_hack:
             }
             break;
 #endif  // MP4D_AVC_SUPPORTED
+
+#if MP4D_HEVC_SUPPORTED
+        case BOX_hvcC:  // HEVCDecoderConfigurationRecord()
+            {
+                // hack: AAC-specific DSI field reused (for it have same purpose as sps/pps)
+                // TODO: check this hack if BOX_esds co-exist with BOX_hvcC
+                tr->object_type_indication = MP4_OBJECT_TYPE_HEVC;
+                tr->dsi = (unsigned char*)malloc((size_t)payload_bytes);
+                tr->dsi_bytes = (unsigned)payload_bytes;
+                for (i = 0; payload_bytes > 0; i++)
+                {
+                    tr->dsi[i] = READ(1);
+                }
+
+                // Parse codec description
+                unsigned char *p = tr->dsi;
+                tr->CodecDescription.hvc1.configuration_version = read_buf(&p, 1);
+                unsigned char profile_info = read_buf(&p, 1);
+                tr->CodecDescription.hvc1.general_profile_space = profile_info >> 6;
+                tr->CodecDescription.hvc1.general_tier_flag = profile_info >> 5 & 1;
+                tr->CodecDescription.hvc1.general_profile_idc = profile_info & 31;
+                tr->CodecDescription.hvc1.general_profile_compatibility_flags = read_buf(&p, 4);
+                for (i = 0; i < 6; i++) {
+                    tr->CodecDescription.hvc1.general_constraint_indicator_flags[i] = read_buf(&p, 1);
+                }
+                tr->CodecDescription.hvc1.general_level_idc = read_buf(&p, 1);
+                tr->CodecDescription.hvc1.min_spatial_segmentation_idc = read_buf(&p, 2) & 4095;
+                tr->CodecDescription.hvc1.parallelismType = read_buf(&p, 1) & 3;
+                tr->CodecDescription.hvc1.chroma_format_idc = read_buf(&p, 1) & 3;
+                tr->CodecDescription.hvc1.bit_depth_luma_minus8 = read_buf(&p, 1) & 7;
+                tr->CodecDescription.hvc1.bit_depth_chroma_minus8 = read_buf(&p, 1) & 7;
+                tr->CodecDescription.hvc1.avg_frame_rate = read_buf(&p, 2);
+                unsigned char fr = read_buf(&p, 1);
+                tr->CodecDescription.hvc1.constant_frame_rate = fr >> 6;
+                tr->CodecDescription.hvc1.num_temporal_layers = fr >> 3 & 7;
+                tr->CodecDescription.hvc1.temporal_id_nested = fr >> 2 & 1;
+                tr->CodecDescription.hvc1.length_size_minus1 = fr & 3;
+
+#if 0
+                unsigned int numOfArrays = READ(1);
+                *p++ = numOfArrays;
+                for (i = 0; i < numOfArrays; i++)
+                {
+                    unsigned char naluType = READ(1);
+                    *p++ = naluType; // & 0x63
+                    unsigned j, naluLength = READ(2);
+                    *p++ = naluLength >> 8;
+                    *p++ = naluLength ;
+                    for (j = 0; j < naluLength; j++)
+                    {
+                        unsigned k, nul = READ(2);
+                        *p++ = nul >> 8;
+                        *p++ = nul ;
+                        for (k = 0; k < nul; k++)
+                        {
+                            *p++ = READ(1);
+                        }
+                    }
+                }
+#endif
+            }
+            break;
+#endif
+
+        case BOX_colr:
+            {
+                unsigned color_type = READ(4);
+                if (color_type == FOUR_CHAR_INT('n', 'c', 'l', 'x')) {
+                    unsigned color_primaries = READ(2);
+                    unsigned transfer_characteristics = READ(2);
+                    unsigned matrix_coefficients = READ(2);
+                    unsigned full_range_flag = READ(1) >> 7;
+                }
+                SKIP(payload_bytes);
+                break;
+            }
 
         case OD_ESD:
             {
@@ -3181,7 +3401,7 @@ broken_android_meta_hack:
         // if box is not envelope, just skip it
         if (i == NELEM(g_envelope_box))
         {
-            if (payload_bytes > file_size)
+            if (payload_bytes > (size_t)file_size)
             {
                 eof_flag = 1;
             } else
@@ -3192,8 +3412,13 @@ broken_android_meta_hack:
 
         // remove empty boxes from stack
         // don't touch box with index 0 (which indicates whole file)
-        while (depth > 0 && !stack[depth].bytes)
+        while (depth > 0 && (stack[depth].bytes == 0 || (stack[depth].format == BOX_ATOM && stack[depth].bytes < 8)))
         {
+            boxsize_t padding = stack[depth].bytes;
+            if (padding)
+            {
+                mp4->read_pos += padding;
+            }
             depth--;
         }
 
@@ -3238,8 +3463,23 @@ static int sample_to_chunk(MP4D_track_t *tr, unsigned nsample, unsigned *nfirst_
     return -1;
 }
 
+/**
+*   Find the nearest sync sample, given a sample.
+*   The sync sample is less or equal the given sample.
+*/
+static int nearest_sync_sample(MP4D_track_t *tr, unsigned nsample)
+{
+    int i;
+    for (i = tr->syncsamples_count - 1; i >= 0; i--) {
+        if (nsample >= tr->syncsamples[i]) {
+            return tr->syncsamples[i];
+        }
+    }
+    return -1;
+}
+
 // Exported API function
-MP4D_file_offset_t MP4D_frame_offset(const MP4D_demux_t *mp4, unsigned ntrack, unsigned nsample, unsigned *frame_bytes, unsigned *timestamp, unsigned *duration)
+MP4D_file_offset_t MP4D_frame_offset(const MP4D_demux_t *mp4, unsigned ntrack, unsigned nsample, unsigned *frame_bytes, unsigned *dts, unsigned *pts, unsigned *duration, int *is_sync)
 {
     MP4D_track_t *tr = mp4->track + ntrack;
     unsigned ns;
@@ -3260,12 +3500,20 @@ MP4D_file_offset_t MP4D_frame_offset(const MP4D_demux_t *mp4, unsigned ntrack, u
 
     *frame_bytes = tr->entry_size[ns];
 
-    if (timestamp)
+    if (dts) {
+#if MP4D_TIMESTAMPS_SUPPORTED
+        *dts = tr->timestamp[ns];
+#else
+        *dts = 0;
+#endif
+    }
+
+    if (pts)
     {
 #if MP4D_TIMESTAMPS_SUPPORTED
-        *timestamp = tr->timestamp[ns];
+        *pts = tr->comp_timestamp ? tr->comp_timestamp[ns] : tr->timestamp[ns];
 #else
-        *timestamp = 0;
+        *pts = 0;
 #endif
     }
     if (duration)
@@ -3277,7 +3525,21 @@ MP4D_file_offset_t MP4D_frame_offset(const MP4D_demux_t *mp4, unsigned ntrack, u
 #endif
     }
 
+    if (is_sync) {
+        int nearest = nearest_sync_sample(tr, nsample);
+        if (nearest >= 0) {
+            *is_sync = (unsigned int)nearest == nsample;
+        }
+    }
+
     return offset;
+}
+
+// Exported API function
+unsigned MP4D_nearest_sync_frame(const MP4D_demux_t *mp4, unsigned ntrack, unsigned nsample)
+{
+    MP4D_track_t *tr = mp4->track + ntrack;
+    return nearest_sync_sample(tr, nsample);
 }
 
 #define FREE(x) if (x) {free(x); x = NULL;}
@@ -3292,6 +3554,7 @@ void MP4D_close(MP4D_demux_t *mp4)
 #if MP4D_TIMESTAMPS_SUPPORTED
         FREE(tr->timestamp);
         FREE(tr->duration);
+        FREE(tr->comp_timestamp);
 #endif
         FREE(tr->sample_to_chunk);
         FREE(tr->chunk_offset);
