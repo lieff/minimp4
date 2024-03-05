@@ -1755,6 +1755,7 @@ int MP4E_close(MP4E_mux_t *mux)
         track_t *tr = ((track_t*)mux->tracks.data) + ntr;
         minimp4_vector_reset(&tr->vsps);
         minimp4_vector_reset(&tr->vpps);
+        minimp4_vector_reset(&tr->vvps);
         minimp4_vector_reset(&tr->smpl);
         minimp4_vector_reset(&tr->pending_sample);
     }
