@@ -2899,6 +2899,17 @@ broken_android_meta_hack:
                     break;
                 sample_size = READ(4);
                 tr->sample_count = READ(4);
+                // The count is file-declared; READ() past the box end only sets eof_flag, so a
+                // few bytes could claim billions of entries (a fuzzer-found hang). Stored sizes
+                // can't outnumber what the payload holds.
+                {
+                    unsigned bits = box_name == BOX_stsz ? (sample_size ? 0 : 32) : (sample_size & 0xFF);
+                    if (bits && tr->sample_count > payload_bytes * 8 / bits)
+                        tr->sample_count = (unsigned)(payload_bytes * 8 / bits);
+                    // A constant size stores no entries: a sample takes at least one byte of the file.
+                    if (!bits && (uint64_t)tr->sample_count > (uint64_t)file_size)
+                        tr->sample_count = (unsigned)file_size;
+                }
                 // (uint64_t) cast: sample_count*4 as native 32-bit
                 // arithmetic can itself overflow/wrap before reaching
                 // minimp4_bounded_malloc's size check, allocating far
@@ -2941,6 +2952,9 @@ broken_android_meta_hack:
             if (!tr)
                 break;
             tr->sample_to_chunk_count = READ(4);
+            // Same file-declared count as stsz: 12 bytes per entry.
+            if (tr->sample_to_chunk_count > payload_bytes / 12)
+                tr->sample_to_chunk_count = (unsigned)(payload_bytes / 12);
             MALLOC(MP4D_sample_to_chunk_t*, tr->sample_to_chunk, tr->sample_to_chunk_count*sizeof(tr->sample_to_chunk[0]));
             for (i = 0; i < tr->sample_to_chunk_count; i++)
             {
@@ -2963,6 +2977,9 @@ broken_android_meta_hack:
                 if (!tr)
                     break;
                 count = READ(4);
+                // Same file-declared count as stsz: 8 bytes per entry.
+                if (count > payload_bytes / 8)
+                    count = (unsigned)(payload_bytes / 8);
                 ts_capacity = count;
 #if MP4D_TIMESTAMPS_SUPPORTED
                 // (uint64_t) cast: same native-arithmetic-overflow gap as
@@ -2977,6 +2994,10 @@ broken_android_meta_hack:
                 {
                     unsigned sc = READ(4);
                     int d =  READ(4);
+                    // A sample takes at least one byte of the file: a file-declared run of
+                    // billions of samples expanded into per-sample tables (a fuzzer-found hang).
+                    if ((uint64_t)k + sc > (uint64_t)file_size)
+                        sc = (unsigned)((uint64_t)file_size - k);
                     uint64_t new_k = (uint64_t)k + sc; // avoid 32-bit wraparound below
                     TRACE(("sample %8d count %8d duration %8d\n", i, sc, d));
 #if MP4D_TIMESTAMPS_SUPPORTED
@@ -3068,6 +3089,9 @@ broken_android_meta_hack:
             if (!tr)
                 break;
             tr->chunk_count = READ(4);
+            // Same file-declared count as stsz: 4 or 8 bytes per entry.
+            if (tr->chunk_count > payload_bytes / (box_name == BOX_co64 ? 8 : 4))
+                tr->chunk_count = (unsigned)(payload_bytes / (box_name == BOX_co64 ? 8 : 4));
             MALLOC(MP4D_file_offset_t*, tr->chunk_offset, tr->chunk_count*sizeof(MP4D_file_offset_t));
             for (i = 0; i < tr->chunk_count; i++)
             {
