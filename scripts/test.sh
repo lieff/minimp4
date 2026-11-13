@@ -66,7 +66,29 @@ rm out.h264
 
 }
 
+test_malformed() {
+EXEC=$1
+for f in vectors/malformed/avcc_overflow.mp4 vectors/malformed/spspps_oob.mp4; do
+    $EXEC -d "$f" /dev/null >/dev/null 2>&1
+    if [ $? -ge 128 ]; then
+        echo "malformed demux test failed: $f"
+        exit 1
+    fi
+done
+
+for f in vectors/malformed/startcode_oob.264 vectors/malformed/allzero_nal.264; do
+    $EXEC -m "$f" out.mp4 >/dev/null 2>&1
+    if [ $? -ge 128 ]; then
+        echo "malformed mux test failed: $f"
+        exit 1
+    fi
+    rm -f out.mp4
+done
+}
+
 test_executable ./minimp4_x86
+test_malformed ./minimp4_x86
 test_executable "qemu-arm ./minimp4_arm_gcc"
+test_malformed "qemu-arm ./minimp4_arm_gcc"
 
 echo test passed

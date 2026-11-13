@@ -2,6 +2,7 @@
 minimp4_*
 qemu-prof
 *.mp4
+!vectors/malformed/*.mp4
 *.gcda
 *.gcno
 *.gcov

@@ -1238,6 +1238,7 @@ static int mp4e_flush_index(MP4E_mux_t *mux)
         index_bytes += tr->smpl.bytes * (sizeof(sample_t) + 4 + 4) / sizeof(sample_t);
         index_bytes += tr->vsps.bytes;
         index_bytes += tr->vpps.bytes;
+        index_bytes += tr->vvps.bytes;
 
         ERR(write_pending_data(mux, tr));
     }
@@ -1594,7 +1595,7 @@ static int mp4e_flush_index(MP4E_mux_t *mux)
                                 }
                             } else
                             {
-                                int numOfVPS  = items_count(&tr->vpps);
+                                int numOfVPS  = items_count(&tr->vvps);
                                 ATOM(BOX_hvcC);
                                 // TODO: read actual params from stream
                                 WRITE_1(1);    // configurationVersion
@@ -1860,7 +1861,15 @@ static void flush_bits(bit_reader_t *bs, int n)
     bs->cache_free_bits += n;
     if (bs->cache_free_bits >= 0)
     {
-        bs->cache |= ((uint32_t)LOAD_SHORT(*bs->buf)) << bs->cache_free_bits;
+        // Read two bytes (or one, near the end) with byte-aligned loads and zero-stuff past the end of the buffer.
+        unsigned int word = 0;
+        const unsigned char *b = (const unsigned char *)bs->buf;
+        const unsigned char *end = (const unsigned char *)bs->origin + bs->origin_bytes;
+        if (b + 1 < end)
+            word = ((unsigned)b[0] << 8) | b[1];
+        else if (b < end)
+            word = (unsigned)b[0] << 8;
+        bs->cache |= word << bs->cache_free_bits;
         bs->buf++;
         bs->cache_free_bits -= 16;
     }
@@ -1916,8 +1925,9 @@ static int ue_bits(bit_reader_t *bs)
 {
     int clz;
     int val;
-    for (clz = 0; !get_bits(bs, 1); clz++) {}
-    //get_bits(bs, clz + 1);
+    for (clz = 0; clz <= 16 && !get_bits(bs, 1); clz++) {}
+    if (clz > 16)
+        return 0;   // truncated/malformed code: too many leading zeros
     val = (1 << clz) - 1 + (clz ? get_bits(bs, clz) : 0);
     return val;
 }
@@ -1935,9 +1945,7 @@ typedef struct
     bs_item_t  *origin;  // initial position
 } bs_t;
 
-#define SWAP32(x) (uint32_t)((((x) >> 24) & 0xFF) | (((x) >> 8) & 0xFF00) | (((x) << 8) & 0xFF0000) | ((x & 0xFF) << 24))
-
-static void h264e_bs_put_bits(bs_t *bs, unsigned n, unsigned val)
+static void minimp4_bs_put_bits(bs_t *bs, unsigned n, unsigned val)
 {
     assert(!(val >> n));
     bs->shift -= n;
@@ -1946,19 +1954,20 @@ static void h264e_bs_put_bits(bs_t *bs, unsigned n, unsigned val)
     {
         assert(-bs->shift < 32);
         bs->cache |= val >> -bs->shift;
-        *bs->buf++ = SWAP32(bs->cache);
+        WR4((unsigned char *)bs->buf, bs->cache);
+        bs->buf++;
         bs->shift = 32 + bs->shift;
         bs->cache = 0;
     }
     bs->cache |= val << bs->shift;
 }
 
-static void h264e_bs_flush(bs_t *bs)
+static void minimp4_bs_flush(bs_t *bs)
 {
-    *bs->buf = SWAP32(bs->cache);
+    WR4((unsigned char *)bs->buf, bs->cache);
 }
 
-static unsigned h264e_bs_get_pos_bits(const bs_t *bs)
+static unsigned minimp4_bs_get_pos_bits(const bs_t *bs)
 {
     unsigned pos_bits = (unsigned)((bs->buf - bs->origin)*BS_BITS);
     pos_bits += BS_BITS - bs->shift;
@@ -1966,10 +1975,10 @@ static unsigned h264e_bs_get_pos_bits(const bs_t *bs)
     return pos_bits;
 }
 
-static unsigned h264e_bs_byte_align(bs_t *bs)
+static unsigned minimp4_bs_byte_align(bs_t *bs)
 {
-    int pos = h264e_bs_get_pos_bits(bs);
-    h264e_bs_put_bits(bs, -pos & 7, 0);
+    int pos = minimp4_bs_get_pos_bits(bs);
+    minimp4_bs_put_bits(bs, -pos & 7, 0);
     return pos + (-pos & 7);
 }
 
@@ -1987,7 +1996,7 @@ static unsigned h264e_bs_byte_align(bs_t *bs)
 *   [7..14] => 0001xxx
 *
 */
-static void h264e_bs_put_golomb(bs_t *bs, unsigned val)
+static void minimp4_bs_put_golomb(bs_t *bs, unsigned val)
 {
     int size = 0;
     unsigned t = val + 1;
@@ -1996,10 +2005,10 @@ static void h264e_bs_put_golomb(bs_t *bs, unsigned val)
         size++;
     } while (t >>= 1);
 
-    h264e_bs_put_bits(bs, 2*size - 1, val + 1);
+    minimp4_bs_put_bits(bs, 2*size - 1, val + 1);
 }
 
-static void h264e_bs_init_bits(bs_t *bs, void *data)
+static void minimp4_bs_init_bits(bs_t *bs, void *data)
 {
     bs->origin = (bs_item_t*)data;
     bs->buf = bs->origin;
@@ -2098,11 +2107,13 @@ static void copy_bits(bit_reader_t *bs, bs_t *bd)
 {
     unsigned cb, bits;
     int bit_count = remaining_bits(bs);
+    if (bit_count <= 0)
+        return;   // nothing left to copy (truncated NAL)
     while (bit_count > 7)
     {
         cb = MINIMP4_MIN(bit_count - 7, 8);
         bits = GetBits(cb);
-        h264e_bs_put_bits(bd, cb, bits);
+        minimp4_bs_put_bits(bd, cb, bits);
         bit_count -= cb;
     }
 
@@ -2114,7 +2125,7 @@ static void copy_bits(bit_reader_t *bs, bs_t *bd)
     }
     if (bit_count)
     {
-        h264e_bs_put_bits(bd, bit_count, bits);
+        minimp4_bs_put_bits(bd, bit_count, bits);
     }
 }
 
@@ -2124,7 +2135,7 @@ static int change_sps_id(bit_reader_t *bs, bs_t *bd, int new_id, int *old_id)
     for (i = 0; i < 3; i++)
     {
         bits = GetBits(8);
-        h264e_bs_put_bits(bd, 8, bits);
+        minimp4_bs_put_bits(bd, 8, bits);
     }
     sps_id = ue_bits(bs);               // max = 31
 
@@ -2132,11 +2143,11 @@ static int change_sps_id(bit_reader_t *bs, bs_t *bd, int new_id, int *old_id)
     sps_id = new_id;
     assert(sps_id <= 31);
 
-    h264e_bs_put_golomb(bd, sps_id);
+    minimp4_bs_put_golomb(bd, sps_id);
     copy_bits(bs, bd);
 
-    bytes = h264e_bs_byte_align(bd) / 8;
-    h264e_bs_flush(bd);
+    bytes = minimp4_bs_byte_align(bd) / 8;
+    minimp4_bs_flush(bd);
     return bytes;
 }
 
@@ -2153,12 +2164,12 @@ static int patch_pps(h264_sps_id_patcher_t *h, bit_reader_t *bs, bs_t *bd, int n
     assert(sps_id <= 31);
     assert(pps_id <= 255);
 
-    h264e_bs_put_golomb(bd, pps_id);
-    h264e_bs_put_golomb(bd, sps_id);
+    minimp4_bs_put_golomb(bd, pps_id);
+    minimp4_bs_put_golomb(bd, sps_id);
     copy_bits(bs, bd);
 
-    bytes = h264e_bs_byte_align(bd) / 8;
-    h264e_bs_flush(bd);
+    bytes = minimp4_bs_byte_align(bd) / 8;
+    minimp4_bs_flush(bd);
     return bytes;
 }
 
@@ -2172,9 +2183,9 @@ static void patch_slice_header(h264_sps_id_patcher_t *h, bit_reader_t *bs, bs_t 
 
     assert(pps_id <= 255);
 
-    h264e_bs_put_golomb(bd, first_mb_in_slice);
-    h264e_bs_put_golomb(bd, slice_type);
-    h264e_bs_put_golomb(bd, pps_id);
+    minimp4_bs_put_golomb(bd, first_mb_in_slice);
+    minimp4_bs_put_golomb(bd, slice_type);
+    minimp4_bs_put_golomb(bd, pps_id);
     copy_bits(bs, bd);
 }
 
@@ -2190,9 +2201,9 @@ static int transcode_nalu(h264_sps_id_patcher_t *h, const unsigned char *src, in
     int payload_type = src[0] & 31;
 
     *dst = *src;
-    h264e_bs_init_bits(bd, dst + 1);
+    minimp4_bs_init_bits(bd, dst + 1);
     init_bits(bs, src + 1, nalu_bytes - 1);
-    h264e_bs_init_bits(bdt, dst + 1);
+    minimp4_bs_init_bits(bdt, dst + 1);
     init_bits(bst, src + 1, nalu_bytes - 1);
 
     switch(payload_type)
@@ -2227,8 +2238,8 @@ static int transcode_nalu(h264_sps_id_patcher_t *h, const unsigned char *src, in
         return nalu_bytes;
     }
 
-    nalu_bytes = 1 + h264e_bs_byte_align(bd) / 8;
-    h264e_bs_flush(bd);
+    nalu_bytes = 1 + minimp4_bs_byte_align(bd) / 8;
+    minimp4_bs_flush(bd);
 
     return nalu_bytes;
 }
@@ -2253,7 +2264,7 @@ static const uint8_t *find_start_code(const uint8_t *h264_data, int h264_data_by
         const uint8_t* found = (uint8_t*)memchr(p, 0, eof - p);
         p = found ? found : eof;
         while (p + zero_cnt < eof && !p[zero_cnt]) zero_cnt++;
-        if (zero_cnt >= 2 && p[zero_cnt] == 1)
+        if (zero_cnt >= 2 && p + zero_cnt < eof && p[zero_cnt] == 1)
         {
             *zcount = zero_cnt + 1;
             return p + zero_cnt + 1;
@@ -2403,10 +2414,12 @@ int mp4_h26x_write_nal(mp4_h26x_writer_t *h, const unsigned char *nal, int lengt
         // - assign unique ID's to different SPS and PPS
         // - assign same ID's to equal (except ID) SPS and PPS
         // - save all different SPS and PPS
-        nal1 = (unsigned char *)malloc(sizeof_nal*17/16 + 32);
+        // nal_put_esc() can expand the NAL by up to 4/3 (a 0x03 emulation-
+        // prevention byte after every two zero bytes) plus the 4-byte start code.
+        nal1 = (unsigned char *)malloc(sizeof_nal*4/3 + 32);
         if (!nal1)
             return MP4E_STATUS_NO_MEMORY;
-        nal2 = (unsigned char *)malloc(sizeof_nal*17/16 + 32);
+        nal2 = (unsigned char *)malloc(sizeof_nal*4/3 + 32);
         if (!nal2)
         {
             free(nal1);
@@ -3605,6 +3618,8 @@ static int skip_spspps(const unsigned char *p, int nbytes, int nskip)
         if (k > nbytes - 2)
             return -1;
         segmbytes = p[k]*256 + p[k+1];
+        if ((int)segmbytes > nbytes - k - 2)
+            return -1;   // segment data would run past the end of the buffer
         k += 2 + segmbytes;
     }
     return k;
@@ -3614,31 +3629,41 @@ static const void *MP4D_read_spspps(const MP4D_demux_t *mp4, unsigned int ntrack
 {
     int sps_count, skip_bytes;
     int bytepos = 0;
+    int dsi_bytes;
     unsigned char *p = mp4->track[ntrack].dsi;
     if (ntrack >= mp4->track_count)
         return NULL;
     if (mp4->track[ntrack].object_type_indication != MP4_OBJECT_TYPE_AVC)
         return NULL;    // SPS/PPS are specific for AVC format only
+    dsi_bytes = (int)mp4->track[ntrack].dsi_bytes;
 
     if (pps_flag)
     {
         // Skip all SPS
+        if (bytepos >= dsi_bytes)
+            return NULL;
         sps_count = p[bytepos++];
-        skip_bytes = skip_spspps(p+bytepos, mp4->track[ntrack].dsi_bytes - bytepos, sps_count);
+        skip_bytes = skip_spspps(p+bytepos, dsi_bytes - bytepos, sps_count);
         if (skip_bytes < 0)
             return NULL;
         bytepos += skip_bytes;
     }
 
     // Skip sps/pps before the given target
+    if (bytepos >= dsi_bytes)
+        return NULL;
     sps_count = p[bytepos++];
     if (nsps >= sps_count)
         return NULL;
-    skip_bytes = skip_spspps(p+bytepos, mp4->track[ntrack].dsi_bytes - bytepos, nsps);
+    skip_bytes = skip_spspps(p+bytepos, dsi_bytes - bytepos, nsps);
     if (skip_bytes < 0)
         return NULL;
     bytepos += skip_bytes;
+    if (bytepos + 2 > dsi_bytes)
+        return NULL;
     *sps_bytes = p[bytepos]*256 + p[bytepos+1];
+    if (bytepos + 2 + *sps_bytes > dsi_bytes)
+        return NULL;   // declared SPS/PPS length exceeds the DSI buffer
     return p + bytepos + 2;
 }
 

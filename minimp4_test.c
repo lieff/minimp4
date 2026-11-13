@@ -67,7 +67,12 @@ typedef struct
 static int read_callback(int64_t offset, void *buffer, size_t size, void *token)
 {
     INPUT_BUFFER *buf = (INPUT_BUFFER*)token;
-    size_t to_copy = MINIMP4_MIN(size, buf->size - offset - size);
+    size_t to_copy;
+
+    if (offset < 0 || offset >= buf->size)
+        return 1;   // reading at or past the end of the input
+
+    to_copy = MINIMP4_MIN(size, (size_t)(buf->size - offset));
     memcpy(buffer, buf->buffer + offset, to_copy);
     return to_copy != size;
 }
@@ -78,7 +83,22 @@ int demux(uint8_t *input_buf, ssize_t input_size, FILE *fout, int ntrack)
     const void *spspps;
     INPUT_BUFFER buf = { input_buf, input_size };
     MP4D_demux_t mp4 = { 0, };
-    MP4D_open(&mp4, read_callback, &buf, input_size);
+    if (!MP4D_open(&mp4, read_callback, &buf, input_size))
+    {
+        printf("error: can't open mp4 file\n");
+        MP4D_close(&mp4);
+        if (input_buf)
+            free(input_buf);
+        return 1;
+    }
+    if (ntrack < 0 || (unsigned)ntrack >= mp4.track_count)
+    {
+        printf("error: track number %d out of range\n", ntrack);
+        MP4D_close(&mp4);
+        if (input_buf)
+            free(input_buf);
+        return 1;
+    }
 
     //for (ntrack = 0; ntrack < mp4.track_count; ntrack++)
     {
