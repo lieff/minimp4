@@ -3212,7 +3212,7 @@ broken_android_meta_hack:
             {
                 ERROR("out of memory");
             }
-            tr->dsi_bytes = (unsigned)box_bytes;
+            tr->dsi_bytes = 0;
             {
                 int spspps;
                 unsigned char *p = tr->dsi;
@@ -3231,23 +3231,28 @@ broken_android_meta_hack:
 
                 for (spspps = 0; spspps < 2; spspps++)
                 {
-                    unsigned int numOfSequenceParameterSets= READ(1);
+                    unsigned int numOfSequenceParameterSets = READ(1);
                     if (!spspps)
                     {
                          numOfSequenceParameterSets &= 31;  // clears 3 msb for SPS
                     }
+                    if ((size_t)(p - tr->dsi) >= (size_t)box_bytes)
+                        break;
                     *p++ = numOfSequenceParameterSets;
                     for (i = 0; i < numOfSequenceParameterSets; i++)
                     {
                         unsigned k, sequenceParameterSetLength = READ(2);
+                        if ((size_t)(p - tr->dsi) + 2 > (size_t)box_bytes)
+                            break;
                         *p++ = sequenceParameterSetLength >> 8;
                         *p++ = sequenceParameterSetLength ;
-                        for (k = 0; k < sequenceParameterSetLength; k++)
+                        for (k = 0; k < sequenceParameterSetLength && (size_t)(p - tr->dsi) < (size_t)box_bytes; k++)
                         {
                             *p++ = READ(1);
                         }
                     }
                 }
+                tr->dsi_bytes = (unsigned)(p - tr->dsi);
             }
             break;
 #endif  // MP4D_AVC_SUPPORTED
