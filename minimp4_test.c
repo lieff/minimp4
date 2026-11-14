@@ -105,7 +105,22 @@ int demux(uint8_t *input_buf, ssize_t input_size, FILE *fout, int ntrack)
         MP4D_track_t *tr = mp4.track + ntrack;
         unsigned sum_duration = 0;
         i = 0;
-        if (tr->handler_type == MP4D_HANDLER_TYPE_VIDE)
+        if (tr->handler_type == MP4D_HANDLER_TYPE_VIDE && tr->sample_entry == BOX_av01)
+        {   // AV1: samples are raw OBUs (no length prefixes). Write the av1C
+            // config OBUs (sequence header) first so the output is a
+            // self-contained AV1 OBU stream, then each sample verbatim.
+            if (tr->dsi_bytes > 4)
+                fwrite(tr->dsi + 4, 1, tr->dsi_bytes - 4, fout);
+            for (i = 0; i < mp4.track[ntrack].sample_count; i++)
+            {
+                unsigned frame_bytes, timestamp, duration;
+                int is_sync;
+                MP4D_file_offset_t ofs = MP4D_frame_offset(&mp4, ntrack, i, &frame_bytes, &timestamp, NULL, &duration, &is_sync);
+                fwrite(input_buf + ofs, 1, frame_bytes, fout);
+                sum_duration += duration;
+            }
+        }
+        else if (tr->handler_type == MP4D_HANDLER_TYPE_VIDE)
         {   // assume h264
 #define USE_SHORT_SYNC 0
             char sync[4] = { 0, 0, 0, 1 };

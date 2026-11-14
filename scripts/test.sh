@@ -86,9 +86,25 @@ for f in vectors/malformed/startcode_oob.264 vectors/malformed/allzero_nal.264; 
 done
 }
 
+test_av1() {
+EXEC=$1
+$EXEC -d vectors/av1.mp4 out.av1.obu >/dev/null 2>&1
+if [ $? -ge 128 ]; then
+    echo "av1 demux test failed"
+    exit 1
+fi
+if [ ! -s out.av1.obu ]; then
+    echo "av1 demux produced no output"
+    exit 1
+fi
+rm -f out.av1.obu
+}
+
 test_executable ./minimp4_x86
 test_malformed ./minimp4_x86
+test_av1 ./minimp4_x86
 test_executable "qemu-arm ./minimp4_arm_gcc"
 test_malformed "qemu-arm ./minimp4_arm_gcc"
+test_av1 "qemu-arm ./minimp4_arm_gcc"
 
 echo test passed

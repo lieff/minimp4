@@ -51,6 +51,7 @@ extern "C" {
 
 #define MP4D_AVC_SUPPORTED        1
 #define MP4D_HEVC_SUPPORTED       1
+#define MP4D_AV1_SUPPORTED        1
 #define MP4D_TIMESTAMPS_SUPPORTED 1
 
 // Enable TrackFragmentBaseMediaDecodeTimeBox support
@@ -210,6 +211,10 @@ typedef struct
     // case 0x6C: return "Visual ISO/IEC 10918-1";
     unsigned object_type_indication;
 
+    // ISOBMFF sample entry type ('avc1', 'hvc1', 'av01', 'mp4a', 'mp4v',
+    // 'mp4s', ...) as a FOUR_CHAR_INT. 0 until a sample entry is parsed.
+    unsigned sample_entry;
+
 #if MP4D_INFO_SUPPORTED
     /************************************************************************/
     /*                 informational public data                            */
@@ -270,8 +275,8 @@ typedef struct
     } SampleDescription;
 #endif
 
-#if MP4D_AVC_SUPPORTED || MP4D_HEVC_SUPPORTED
-    // Codec-specific configuration record data (avcC/hvcC).
+#if MP4D_AVC_SUPPORTED || MP4D_HEVC_SUPPORTED || MP4D_AV1_SUPPORTED
+    // Codec-specific configuration record data (avcC/hvcC/av1C).
     union
     {
         struct {
@@ -301,6 +306,22 @@ typedef struct
             unsigned short temporal_id_nested;
             unsigned short length_size_minus1;
         } hvc1;
+
+        struct {
+            unsigned char marker;
+            unsigned char version;
+            unsigned char seq_profile;
+            unsigned char seq_level_idx_0;
+            unsigned char seq_tier_0;
+            unsigned char high_bitdepth;
+            unsigned char twelve_bit;
+            unsigned char monochrome;
+            unsigned char chroma_subsampling_x;
+            unsigned char chroma_subsampling_y;
+            unsigned char chroma_sample_position;
+            unsigned char initial_presentation_delay_present;
+            unsigned char initial_presentation_delay_minus_one;
+        } av1;
     } CodecDescription;
 #endif
 
@@ -657,6 +678,10 @@ enum
     BOX_hev1    = FOUR_CHAR_INT( 'h', 'e', 'v', '1' ),
     BOX_hvc1    = FOUR_CHAR_INT( 'h', 'v', 'c', '1' ),
     BOX_hvcC    = FOUR_CHAR_INT( 'h', 'v', 'c', 'C' ),
+
+    // AV1
+    BOX_av01    = FOUR_CHAR_INT( 'a', 'v', '0', '1' ),
+    BOX_av1C    = FOUR_CHAR_INT( 'a', 'v', '1', 'C' ),
 
     //3GPP atoms
     BOX_samr    = FOUR_CHAR_INT( 's', 'a', 'm', 'r' ),//AMRSampleEntryAtomType
@@ -2859,6 +2884,9 @@ int MP4D_open(MP4D_demux_t *mp4, int (*read_callback)(int64_t offset, void *buff
 #if MP4D_HEVC_SUPPORTED
             {BOX_hvc1, BOX_ATOM},
 #endif
+#if MP4D_AV1_SUPPORTED
+            {BOX_av01, BOX_ATOM},
+#endif
             {BOX_udta, BOX_ATOM},
             {BOX_meta, BOX_ATOM},
             {BOX_ilst, BOX_ATOM}
@@ -3364,6 +3392,7 @@ broken_android_meta_hack:
             {
                 ERROR("broken file structure!");
             }
+            tr->sample_entry = box_name;
             SKIP(6*1 + 2/*Base SampleEntry*/);
             break;
 
@@ -3372,6 +3401,7 @@ broken_android_meta_hack:
             {
                 ERROR("broken file structure!");
             }
+            tr->sample_entry = box_name;
 #if MP4D_INFO_SUPPORTED
             SKIP(6*1+2/*Base SampleEntry*/  + 4*2);
             tr->SampleDescription.audio.channelcount = READ(2);
@@ -3388,10 +3418,12 @@ broken_android_meta_hack:
 //         case BOX_avc2:   - no test
 //         case BOX_svc1:   - no test
         case BOX_mp4v:
+        case BOX_av01:  // AV1SampleEntry extends VisualSampleEntry ('av1C' inside)
             if (!tr)
             {
                 ERROR("broken file structure!");
             }
+            tr->sample_entry = box_name;
 #if MP4D_INFO_SUPPORTED
             SKIP(6*1 + 2/*Base SampleEntry*/ + 2 + 2 + 4*3);
             tr->SampleDescription.video.width  = READ(2);
@@ -3535,6 +3567,57 @@ broken_android_meta_hack:
             }
             break;
 #endif  // MP4D_HEVC_SUPPORTED
+
+#if MP4D_AV1_SUPPORTED
+        case BOX_av1C:  // AV1CodecConfigurationRecord()
+            // hack: AAC-specific DSI field reused (it holds the av1C record).
+            // AV1 has no MPEG-4 systems object_type_indication; the codec is
+            // identified by the 'av01' sample entry instead, so we leave
+            // object_type_indication untouched and expose config via dsi.
+            if (!tr)
+                break;
+            tr->dsi = (unsigned char*)minimp4_bounded_malloc((size_t)box_bytes);
+            if (!tr->dsi)
+            {
+                ERROR("out of memory");
+            }
+            tr->dsi_bytes = 0;
+            {
+                // Copy the whole AV1CodecConfigurationRecord into dsi.
+                unsigned char *p = tr->dsi;
+                while (payload_bytes > 0)
+                {
+                    *p++ = (unsigned char)READ(1);
+                }
+                tr->dsi_bytes = (unsigned)(p - tr->dsi);
+            }
+            {
+                // Parse the fixed 4-byte AV1CodecConfigurationRecord header.
+                const unsigned char *p = tr->dsi;
+                const unsigned char *end = tr->dsi + tr->dsi_bytes;
+                if (end - p >= 4)
+                {
+                    unsigned char b0 = (unsigned char)read_buf(&p, end, 1);
+                    unsigned char b1 = (unsigned char)read_buf(&p, end, 1);
+                    unsigned char b2 = (unsigned char)read_buf(&p, end, 1);
+                    unsigned char b3 = (unsigned char)read_buf(&p, end, 1);
+                    tr->CodecDescription.av1.marker = b0 >> 7;
+                    tr->CodecDescription.av1.version = b0 & 0x7f;
+                    tr->CodecDescription.av1.seq_profile = b1 >> 5;
+                    tr->CodecDescription.av1.seq_level_idx_0 = b1 & 0x1f;
+                    tr->CodecDescription.av1.seq_tier_0 = b2 >> 7;
+                    tr->CodecDescription.av1.high_bitdepth = (b2 >> 6) & 1;
+                    tr->CodecDescription.av1.twelve_bit = (b2 >> 5) & 1;
+                    tr->CodecDescription.av1.monochrome = (b2 >> 4) & 1;
+                    tr->CodecDescription.av1.chroma_subsampling_x = (b2 >> 3) & 1;
+                    tr->CodecDescription.av1.chroma_subsampling_y = (b2 >> 2) & 1;
+                    tr->CodecDescription.av1.chroma_sample_position = b2 & 3;
+                    tr->CodecDescription.av1.initial_presentation_delay_present = (b3 >> 4) & 1;
+                    tr->CodecDescription.av1.initial_presentation_delay_minus_one = b3 & 0xf;
+                }
+            }
+            break;
+#endif  // MP4D_AV1_SUPPORTED
 
         case OD_ESD:
             {
