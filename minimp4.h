@@ -2914,7 +2914,10 @@ broken_android_meta_hack:
                                 ERROR("broken file structure!");
                             }
                             stack[depth].bytes -= box_bytes;;
-                            depth++;
+                            if (++depth >= MAX_CHUNKS_DEPTH)
+                            {
+                                ERROR("too deep atoms nesting!");
+                            }
                             stack[depth].bytes = payload_bytes + 4; // +4 need for missing header
                             stack[depth].format = BOX_ATOM;
                             box_bytes = FullAtomVersionAndFlags;
@@ -3043,6 +3046,11 @@ broken_android_meta_hack:
                                 tr->entry_size[i] = (size >> 4);
                             }
                             break;
+                        default:
+                            // Unknown field size: treat the sample as empty rather
+                            // than leave entry_size[i] uninitialized (CWE-908).
+                            tr->entry_size[i] = 0;
+                            break;
                         }
                     }
                 }
@@ -3057,7 +3065,7 @@ broken_android_meta_hack:
             // Same file-declared count as stsz: 12 bytes per entry.
             if (tr->sample_to_chunk_count > payload_bytes / 12)
                 tr->sample_to_chunk_count = (unsigned)(payload_bytes / 12);
-            MALLOC(MP4D_sample_to_chunk_t*, tr->sample_to_chunk, tr->sample_to_chunk_count*sizeof(tr->sample_to_chunk[0]));
+            MALLOC(MP4D_sample_to_chunk_t*, tr->sample_to_chunk, (uint64_t)tr->sample_to_chunk_count*sizeof(tr->sample_to_chunk[0]));
             for (i = 0; i < tr->sample_to_chunk_count; i++)
             {
                 tr->sample_to_chunk[i].first_chunk = READ(4);
@@ -3215,7 +3223,7 @@ broken_android_meta_hack:
             // Same file-declared count as stsz: 4 or 8 bytes per entry.
             if (tr->chunk_count > payload_bytes / (box_name == BOX_co64 ? 8 : 4))
                 tr->chunk_count = (unsigned)(payload_bytes / (box_name == BOX_co64 ? 8 : 4));
-            MALLOC(MP4D_file_offset_t*, tr->chunk_offset, tr->chunk_count*sizeof(MP4D_file_offset_t));
+            MALLOC(MP4D_file_offset_t*, tr->chunk_offset, (uint64_t)tr->chunk_count*sizeof(MP4D_file_offset_t));
             for (i = 0; i < tr->chunk_count; i++)
             {
                 tr->chunk_offset[i] = READ(4);
