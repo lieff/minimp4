@@ -125,7 +125,8 @@ int demux(uint8_t *input_buf, ssize_t input_size, FILE *fout, int ntrack)
             for (i = 0; i < mp4.track[ntrack].sample_count; i++)
             {
                 unsigned frame_bytes, timestamp, duration;
-                MP4D_file_offset_t ofs = MP4D_frame_offset(&mp4, ntrack, i, &frame_bytes, &timestamp, &duration);
+                int is_sync;
+                MP4D_file_offset_t ofs = MP4D_frame_offset(&mp4, ntrack, i, &frame_bytes, &timestamp, NULL, &duration, &is_sync);
                 uint8_t *mem = input_buf + ofs;
                 sum_duration += duration;
                 while (frame_bytes)
@@ -158,7 +159,8 @@ int demux(uint8_t *input_buf, ssize_t input_size, FILE *fout, int ntrack)
             for (i = 0; i < mp4.track[ntrack].sample_count; i++)
             {
                 unsigned frame_bytes, timestamp, duration;
-                MP4D_file_offset_t ofs = MP4D_frame_offset(&mp4, ntrack, i, &frame_bytes, &timestamp, &duration);
+                int is_sync;
+                MP4D_file_offset_t ofs = MP4D_frame_offset(&mp4, ntrack, i, &frame_bytes, &timestamp, NULL, &duration, &is_sync);
                 printf("ofs=%d frame_bytes=%d timestamp=%d duration=%d\n", (unsigned)ofs, frame_bytes, timestamp, duration);
 #if ENABLE_AUDIO
                 UCHAR *frame = (UCHAR *)(input_buf + ofs);
@@ -292,6 +294,7 @@ int main(int argc, char **argv)
     tr.time_scale = 90000;
     tr.default_duration = 0;
     tr.u.a.channelcount = 1;
+    tr.u.a.samplerate_hz = AUDIO_RATE;
     int audio_track_id = MP4E_add_track(mux, &tr);
     MP4E_set_dsi(mux, audio_track_id, info.confBuf, info.confSize);
 #endif
