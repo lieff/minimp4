@@ -2984,7 +2984,7 @@ broken_android_meta_hack:
                 TRACE(("Wrong %c%c%c%c box size: broken file?\n", (box_name >> 24)&255, (box_name >> 16)&255, (box_name >> 8)&255, box_name&255));
                 box_bytes = stack[depth].bytes;
                 box_name = 0;
-                payload_bytes = box_bytes - read_bytes;
+                payload_bytes = (box_bytes > (boxsize_t)read_bytes) ? box_bytes - read_bytes : 0;
             }
             stack[depth].bytes -= box_bytes;
         }
