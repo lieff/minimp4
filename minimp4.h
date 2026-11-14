@@ -2918,8 +2918,12 @@ broken_android_meta_hack:
                 // can't outnumber what the payload holds.
                 {
                     unsigned bits = box_name == BOX_stsz ? (sample_size ? 0 : 32) : (sample_size & 0xFF);
-                    if (bits && tr->sample_count > payload_bytes * 8 / bits)
-                        tr->sample_count = (unsigned)(payload_bytes * 8 / bits);
+                    if (bits)
+                    {
+                        uint64_t cap = (payload_bytes > (uint64_t)UINT_MAX * 8) ? UINT_MAX : (payload_bytes * 8 / bits);
+                        if (tr->sample_count > cap)
+                            tr->sample_count = (unsigned)cap;
+                    }
                     // A constant size stores no entries: a sample takes at least one byte of the file.
                     if (!bits && (uint64_t)tr->sample_count > (uint64_t)file_size)
                         tr->sample_count = (unsigned)file_size;
