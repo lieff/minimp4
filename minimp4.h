@@ -2204,6 +2204,9 @@ static int change_sps_id(bit_reader_t *bs, bs_t *bd, int new_id, int *old_id)
     }
     sps_id = ue_bits(bs);               // max = 31
 
+    if (sps_id >= MINIMP4_MAX_SPS)
+        return 0;   // malformed SPS id, reject (CWE-125/787)
+
     *old_id = sps_id;
     sps_id = new_id;
     assert(sps_id <= 31);
@@ -2222,6 +2225,9 @@ static int patch_pps(h264_sps_id_patcher_t *h, bit_reader_t *bs, bs_t *bd, int n
     unsigned pps_id = ue_bits(bs);  // max = 255
     unsigned sps_id = ue_bits(bs);  // max = 31
 
+    if (pps_id >= MINIMP4_MAX_PPS || sps_id >= MINIMP4_MAX_SPS)
+        return 0;   // malformed id, reject (CWE-125/787)
+
     *old_id = pps_id;
     sps_id = h->map_sps[sps_id];
     pps_id = new_pps_id;
@@ -2238,11 +2244,14 @@ static int patch_pps(h264_sps_id_patcher_t *h, bit_reader_t *bs, bs_t *bd, int n
     return bytes;
 }
 
-static void patch_slice_header(h264_sps_id_patcher_t *h, bit_reader_t *bs, bs_t *bd)
+static int patch_slice_header(h264_sps_id_patcher_t *h, bit_reader_t *bs, bs_t *bd)
 {
     unsigned first_mb_in_slice = ue_bits(bs);
     unsigned slice_type = ue_bits(bs);
     unsigned pps_id = ue_bits(bs);
+
+    if (pps_id >= MINIMP4_MAX_PPS)
+        return 0;   // malformed PPS id, reject (CWE-125)
 
     pps_id = h->map_pps[pps_id];
 
@@ -2252,6 +2261,7 @@ static void patch_slice_header(h264_sps_id_patcher_t *h, bit_reader_t *bs, bs_t 
     minimp4_bs_put_golomb(bd, slice_type);
     minimp4_bs_put_golomb(bd, pps_id);
     copy_bits(bs, bd);
+    return 1;
 }
 
 static int transcode_nalu(h264_sps_id_patcher_t *h, const unsigned char *src, int nalu_bytes, unsigned char *dst)
@@ -2296,7 +2306,8 @@ static int transcode_nalu(h264_sps_id_patcher_t *h, const unsigned char *src, in
     case 1:
     case 2:
     case 5:
-        patch_slice_header(h, bs, bd);
+        if (!patch_slice_header(h, bs, bd))
+            return 0;
         break;
     default:
         memcpy(dst, src, nalu_bytes);
@@ -2500,6 +2511,8 @@ exit_with_free:
         }
 
         sizeof_nal = transcode_nalu(&h->sps_patcher, nal2, sizeof_nal, nal1);
+        if (!sizeof_nal)
+            goto exit_with_free;
         sizeof_nal = nal_put_esc(nal2, nal1, sizeof_nal);
 
         switch (payload_type) {
@@ -2616,6 +2629,11 @@ static int minimp4_fgets(MP4D_demux_t *mp4)
 static unsigned minimp4_read(MP4D_demux_t *mp4, int nb, int *eof_flag)
 {
     uint32_t v = 0; int last_byte;
+    if (nb <= 0)
+    {
+        *eof_flag = 1;
+        return 0;
+    }
     switch (nb)
     {
     case 4: v = (v << 8) | minimp4_fgets(mp4);
@@ -3602,7 +3620,7 @@ broken_android_meta_hack:
             // 4 tracks for movie file,
             // 3-5 tracks for scalable audio (CELP+AAC)
             // and up to 50 tracks for BSAC scalable audio
-            void *mem = realloc(mp4->track, (mp4->track_count + 1)*sizeof(MP4D_track_t));
+            void *mem = realloc(mp4->track, (uint64_t)(mp4->track_count + 1)*sizeof(MP4D_track_t));
             if (!mem)
             {
                 // if realloc fails, it does not deallocate old pointer!
