@@ -948,16 +948,6 @@ int MP4E_add_track(MP4E_mux_t *mux, const MP4E_track_t *track_data)
     return ntr;
 }
 
-static const unsigned char *next_dsi(const unsigned char *p, const unsigned char *end, int *bytes)
-{
-    if (p < end + 2)
-    {
-        *bytes = p[0]*256 + p[1];
-        return p + 2;
-    } else
-        return NULL;
-}
-
 static int append_mem(minimp4_vector_t *v, const void *mem, int bytes)
 {
     int i;
@@ -3926,9 +3916,10 @@ static const void *MP4D_read_spspps(const MP4D_demux_t *mp4, unsigned int ntrack
     int sps_count, skip_bytes;
     int bytepos = 0;
     int dsi_bytes;
-    unsigned char *p = mp4->track[ntrack].dsi;
+    unsigned char *p;
     if (ntrack >= mp4->track_count)
         return NULL;
+    p = mp4->track[ntrack].dsi;
     if (mp4->track[ntrack].object_type_indication != MP4_OBJECT_TYPE_AVC)
         return NULL;    // SPS/PPS are specific for AVC format only
     dsi_bytes = (int)mp4->track[ntrack].dsi_bytes;
