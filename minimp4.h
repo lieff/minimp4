@@ -1633,9 +1633,11 @@ static int mp4e_flush_index(MP4E_mux_t *mux)
                                 ATOM(BOX_avcC);
                                 // AVCDecoderConfigurationRecord 5.2.4.1.1
                                 WRITE_1(1); // configurationVersion
-                                WRITE_1(tr->vsps.data[2 + 1]);
-                                WRITE_1(tr->vsps.data[2 + 2]);
-                                WRITE_1(tr->vsps.data[2 + 3]);
+                                // AVCProfileIndication / profile_compatibility / AVCLevelIndication:
+                                // don't read uninitialized vector bytes when the SPS is truncated.
+                                WRITE_1(tr->vsps.bytes >= 6 ? tr->vsps.data[3] : 0);
+                                WRITE_1(tr->vsps.bytes >= 6 ? tr->vsps.data[4] : 0);
+                                WRITE_1(tr->vsps.bytes >= 6 ? tr->vsps.data[5] : 0);
                                 WRITE_1(255); // 0xfc + NALU_len - 1
                                 WRITE_1(0xe0 | numOfSequenceParameterSets);
                                 for (i = 0; i < tr->vsps.bytes; i++)
