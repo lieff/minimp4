@@ -755,10 +755,11 @@ typedef struct
     unsigned flag_random_access;
 } sample_t;
 
-typedef struct {
+typedef struct
+{
     unsigned char *data;
-    int bytes;
-    int capacity;
+    size_t bytes;
+    size_t capacity;
 } minimp4_vector_t;
 
 typedef struct
@@ -826,7 +827,7 @@ static const unsigned char box_ftyp[] = {
 /**
     Allocate vector with given size, return 1 on success, 0 on fail
 */
-static int minimp4_vector_init(minimp4_vector_t *h, int capacity)
+static int minimp4_vector_init(minimp4_vector_t *h, size_t capacity)
 {
     h->bytes = 0;
     h->capacity = capacity;
@@ -850,9 +851,9 @@ static void minimp4_vector_reset(minimp4_vector_t *h)
 static int minimp4_vector_grow(minimp4_vector_t *h, int bytes)
 {
     void *p;
-    int new_size = h->capacity*2 + 1024;
-    if (new_size < h->capacity + bytes)
-        new_size = h->capacity + bytes + 1024;
+    size_t new_size = h->capacity*2 + 1024;
+    if (new_size < h->capacity + (size_t)bytes)
+        new_size = h->capacity + (size_t)bytes + 1024;
     p = realloc(h->data, new_size);
     if (!p)
         return 0;
@@ -869,14 +870,14 @@ static int minimp4_vector_grow(minimp4_vector_t *h, int bytes)
 static unsigned char *minimp4_vector_alloc_tail(minimp4_vector_t *h, int bytes)
 {
     unsigned char *p;
-    if (!h->data && !minimp4_vector_init(h, 2*bytes + 1024))
+    if (!h->data && !minimp4_vector_init(h, (size_t)2*bytes + 1024))
         return NULL;
-    if ((h->capacity - h->bytes) < bytes && !minimp4_vector_grow(h, bytes))
+    if ((h->capacity - h->bytes) < (size_t)bytes && !minimp4_vector_grow(h, bytes))
         return NULL;
     assert(h->data);
-    assert((h->capacity - h->bytes) >= bytes);
+    assert((h->capacity - h->bytes) >= (size_t)bytes);
     p = h->data + h->bytes;
-    h->bytes += bytes;
+    h->bytes += (size_t)bytes;
     return p;
 }
 
@@ -930,7 +931,7 @@ MP4E_mux_t *MP4E_open(int sequential_mode_flag, int enable_fragmentation, void *
 int MP4E_add_track(MP4E_mux_t *mux, const MP4E_track_t *track_data)
 {
     track_t *tr;
-    int ntr = mux->tracks.bytes / sizeof(track_t);
+    int ntr = (int)(mux->tracks.bytes / sizeof(track_t));
 
     if (!mux || !track_data)
         return MP4E_STATUS_BAD_ARGUMENTS;
@@ -1245,6 +1246,24 @@ static int od_size_of_size(int size)
 }
 
 /**
+*   Write a big-endian 7-bit variable-length OD length field: each byte
+*   carries 7 bits of the value, and the high bit (0x80) marks that
+*   another byte follows.
+*/
+static void write_od_len(unsigned char **p, unsigned size)
+{
+    unsigned char buf[5];
+    int n = 0, i;
+    do {
+        buf[n++] = (unsigned char)(size & 0x7F);
+        size >>= 7;
+    } while (size);
+    for (i = n - 1; i > 0; i--)
+        *(*p)++ = (unsigned char)(buf[i] | 0x80);
+    *(*p)++ = buf[0];
+}
+
+/**
 *   Add or remove MP4 file text comment according to Apple specs:
 *   https://developer.apple.com/library/mac/documentation/QuickTime/QTFF/Metadata/Metadata.html#//apple_ref/doc/uid/TP40000939-CH1-SW1
 *   http://atomicparsley.sourceforge.net/mpeg-4files.html
@@ -1270,7 +1289,8 @@ static int mp4e_flush_index(MP4E_mux_t *mux)
     unsigned char *stack_base[20]; // atoms nesting stack
     unsigned char **stack = stack_base;
     unsigned char *base, *p;
-    unsigned int ntr, index_bytes, ntracks = mux->tracks.bytes / sizeof(track_t);
+    unsigned int ntr, ntracks = (unsigned)(mux->tracks.bytes / sizeof(track_t));
+    size_t index_bytes;
     int i, err;
 
     // How much memory needed for indexes
@@ -1339,7 +1359,7 @@ static int mp4e_flush_index(MP4E_mux_t *mux)
         {
             track_t *tr = ((track_t*)mux->tracks.data) + 0;    // take 1st track
             unsigned duration = get_duration(tr);
-            duration = (unsigned)(duration * 1LL * MOOV_TIMESCALE / tr->info.time_scale);
+            duration = tr->info.time_scale ? (unsigned)(duration * 1LL * MOOV_TIMESCALE / tr->info.time_scale) : 0;
             WRITE_4(MOOV_TIMESCALE); // duration
             WRITE_4(duration); // duration
         }
@@ -1369,7 +1389,7 @@ static int mp4e_flush_index(MP4E_mux_t *mux)
     {
         track_t *tr = ((track_t*)mux->tracks.data) + ntr;
         unsigned duration = get_duration(tr);
-        int samples_count = tr->smpl.bytes / sizeof(sample_t);
+        int samples_count = (int)(tr->smpl.bytes / sizeof(sample_t));
         const sample_t *sample = (const sample_t *)tr->smpl.data;
         unsigned handler_type;
         const char *handler_ascii = NULL;
@@ -1403,7 +1423,7 @@ static int mp4e_flush_index(MP4E_mux_t *mux)
             WRITE_4(0);             // modification_time
             WRITE_4(ntr + 1);       // track_ID
             WRITE_4(0);             // reserved
-            WRITE_4((unsigned)(duration * 1LL * MOOV_TIMESCALE / tr->info.time_scale));
+            WRITE_4(tr->info.time_scale ? (unsigned)(duration * 1LL * MOOV_TIMESCALE / tr->info.time_scale) : 0);
             WRITE_4(0); WRITE_4(0); // reserved[2]
             WRITE_2(0);             // layer
             WRITE_2(0);             // alternate_group
@@ -1421,8 +1441,8 @@ static int mp4e_flush_index(MP4E_mux_t *mux)
                 WRITE_4(0); // height
             } else
             {
-                WRITE_4(tr->info.u.v.width*0x10000);  // width
-                WRITE_4(tr->info.u.v.height*0x10000); // height
+                WRITE_4((unsigned)tr->info.u.v.width*0x10000);  // width
+                WRITE_4((unsigned)tr->info.u.v.height*0x10000); // height
             }
             END_ATOM;
 
@@ -1522,20 +1542,19 @@ static int mp4e_flush_index(MP4E_mux_t *mux)
                                 ATOM_FULL(BOX_esds, 0);
                                 if (tr->vsps.bytes > 0)
                                 {
-                                    int dsi_bytes = tr->vsps.bytes - 2; //  - two bytes size field
+                                    int dsi_bytes = (int)(tr->vsps.bytes - 2); //  - two bytes size field
                                     int dsi_size_size = od_size_of_size(dsi_bytes);
                                     int dcd_bytes = dsi_bytes + dsi_size_size + 1 + (1 + 1 + 3 + 4 + 4);
                                     int dcd_size_size = od_size_of_size(dcd_bytes);
                                     int esd_bytes = dcd_bytes + dcd_size_size + 1 + 3;
 
-#define WRITE_OD_LEN(size) if (size > 0x7F) do { size -= 0x7F; WRITE_1(0x00ff); } while (size > 0x7F); WRITE_1(size)
                                     WRITE_1(3); // OD_ESD
-                                    WRITE_OD_LEN(esd_bytes);
+                                    write_od_len(&p, (unsigned)esd_bytes);
                                     WRITE_2(0); // ES_ID(2) // TODO - what is this?
                                     WRITE_1(0); // flags(1)
 
                                     WRITE_1(4); // OD_DCD
-                                    WRITE_OD_LEN(dcd_bytes);
+                                    write_od_len(&p, (unsigned)dcd_bytes);
                                     if (tr->info.track_media_kind == e_audio)
                                     {
                                         WRITE_1(MP4_OBJECT_TYPE_AUDIO_ISO_IEC_14496_3); // OD_DCD
@@ -1551,7 +1570,7 @@ static int mp4e_flush_index(MP4E_mux_t *mux)
                                     WRITE_4(0); // avg_bitrate_bps TODO
 
                                     WRITE_1(5); // OD_DSI
-                                    WRITE_OD_LEN(dsi_bytes);
+                                    write_od_len(&p, (unsigned)dsi_bytes);
                                     for (i = 0; i < dsi_bytes; i++)
                                     {
                                         WRITE_1(tr->vsps.data[2 + i]);
@@ -1863,7 +1882,7 @@ int MP4E_close(MP4E_mux_t *mux)
         err = mp4e_flush_index(mux);
     if (mux->text_comment)
         free(mux->text_comment);
-    ntracks = mux->tracks.bytes / sizeof(track_t);
+    ntracks = (unsigned)(mux->tracks.bytes / sizeof(track_t));
     for (ntr = 0; ntr < ntracks; ntr++)
     {
         track_t *tr = ((track_t*)mux->tracks.data) + ntr;
