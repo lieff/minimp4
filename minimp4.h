@@ -55,7 +55,10 @@ extern "C" {
 #define MP4D_TIMESTAMPS_SUPPORTED 1
 
 // Enable TrackFragmentBaseMediaDecodeTimeBox support
+// Can be overridden at build time (-DMP4D_TFDT_SUPPORT=1).
+#ifndef MP4D_TFDT_SUPPORT
 #define MP4D_TFDT_SUPPORT         0
+#endif
 
 /************************************************************************/
 /*          Some values of MP4(E/D)_track_t->object_type_indication     */
@@ -797,6 +800,10 @@ typedef struct
     minimp4_vector_t vpps;  // not used for audio
     minimp4_vector_t vvps;  // used for HEVC
 
+    // Accumulated duration of samples written in fragmentation mode;
+    // used as the tfdt base media decode time.
+    uint64_t fragment_duration_sum;
+
 } track_t;
 
 typedef struct MP4E_mux_tag
@@ -1210,9 +1217,10 @@ int MP4E_put_sample(MP4E_mux_t *mux, int track_num, const void *data, int data_b
     if (mux->enable_fragmentation)
     {
         #if MP4D_TFDT_SUPPORT
-        // NOTE: assume a constant `duration` to calculate current timestamp
-        uint64_t timestamp = (uint64_t)mux->fragments_count * duration;
+        // Correct for variable sample durations, unlike fragments_count * duration.
+        uint64_t timestamp = tr->fragment_duration_sum;
         #endif
+        tr->fragment_duration_sum += (uint64_t)duration;
         if (!mux->fragments_count++)
             ERR(mp4e_flush_index(mux)); // write file headers before 1st sample
         // write MOOF + MDAT + sample data
